@@ -171,6 +171,20 @@ export const S = {
     minHeight: '100px',
     transition: 'border-color 0.15s',
   },
+  // Compact right-aligned input for inline field edits in the ticket Details panel.
+  inlineEdit: {
+    padding: '3px 8px',
+    borderRadius: '5px',
+    border: '1px solid var(--border-default)',
+    background: 'var(--bg-page)',
+    fontSize: '13px',
+    fontWeight: 700,
+    color: 'var(--text-primary)',
+    textAlign: 'right',
+    outline: 'none',
+    maxWidth: '190px',
+    fontFamily: "'Inter', sans-serif",
+  },
   select: {
     width: '100%',
     padding: '10px 14px',

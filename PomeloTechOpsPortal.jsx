@@ -3715,6 +3715,9 @@ function TicketDetail({
   const canDeleteTicket = can('tickets.delete');
   // Field edits mirror the server's PATCH rule: staff or the assignee.
   const canEditFields = canViewAll || isAssignedToMe;
+  // Full post-creation editing of every field (incl. requester, department,
+  // shop, platforms) is admin-only — gated by the tickets.edit_all capability.
+  const canEditAll = can('tickets.edit_all');
   const [confirmDel, setConfirmDel] = useState(false);
   const [newMsg, setNewMsg] = useState('');
   const [messages, setMessages] = useState(ticket.messages);
@@ -3863,6 +3866,37 @@ function TicketDetail({
       _currentActor,
       { type: 'ticket', id: ticket.id, label: ticket.title },
       { changedKeys: Object.keys(fields) }
+    );
+  };
+
+  // Requester lives as a nested { name, email } object locally but as two flat
+  // columns server-side, so it can't ride patchTicket's spread. Admin-only.
+  const patchRequester = ({ name, email }) => {
+    const nextName = name !== undefined ? name : ticket.requester?.name || '';
+    const nextEmail = email !== undefined ? email : ticket.requester?.email || '';
+    updateTickets(ts =>
+      ts.map(t =>
+        t.id === ticket.id
+          ? {
+              ...t,
+              requester: { name: nextName, email: nextEmail },
+              updated: new Date().toISOString().slice(0, 10),
+            }
+          : t
+      )
+    );
+    mirror(
+      ticket.uuid &&
+        ticketsApi.updateTicket(ticket.uuid, {
+          requesterName: nextName,
+          requesterEmail: nextEmail,
+        })
+    );
+    recordAudit(
+      'ticket.update',
+      _currentActor,
+      { type: 'ticket', id: ticket.id, label: ticket.title },
+      { changedKeys: ['requester'] }
     );
   };
 
@@ -4201,9 +4235,46 @@ function TicketDetail({
           >
             {ticket.id}
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 900, color: 'var(--text-primary)' }}>
-            {ticket.title}
-          </div>
+          {canEditAll ? (
+            <input
+              key={`title-${ticket.id}`}
+              defaultValue={ticket.title}
+              aria-label="Ticket title"
+              onBlur={e => {
+                const v = e.target.value.trim();
+                if (v && v !== ticket.title) patchTicket({ title: v });
+                else e.target.value = ticket.title;
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') e.target.blur();
+                if (e.key === 'Escape') {
+                  e.target.value = ticket.title;
+                  e.target.blur();
+                }
+              }}
+              style={{
+                fontSize: '22px',
+                fontWeight: 900,
+                color: 'var(--text-primary)',
+                background: 'transparent',
+                border: '1px solid transparent',
+                borderRadius: '6px',
+                padding: '2px 6px',
+                margin: '-2px -6px',
+                width: '100%',
+                minWidth: '320px',
+                outline: 'none',
+              }}
+              onFocus={e => {
+                e.target.style.border = '1px solid var(--border-default)';
+                e.target.style.background = 'var(--bg-page)';
+              }}
+            />
+          ) : (
+            <div style={{ fontSize: '22px', fontWeight: 900, color: 'var(--text-primary)' }}>
+              {ticket.title}
+            </div>
+          )}
           {(assigneeContext || ticket.requester) && (
             <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
               {canViewAll && ticket.requester && (
@@ -5095,11 +5166,62 @@ function TicketDetail({
                 </span>
               )}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Reporter</span>
-              <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 700 }}>
-                {ticket.requester?.name || '—'}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: canEditAll ? 'flex-start' : 'center',
+                gap: '10px',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: '13px',
+                  color: 'var(--text-secondary)',
+                  flexShrink: 0,
+                  paddingTop: canEditAll ? '4px' : 0,
+                }}
+              >
+                Reporter
               </span>
+              {canEditAll ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    alignItems: 'flex-end',
+                  }}
+                >
+                  <input
+                    key={`reqname-${ticket.id}`}
+                    defaultValue={ticket.requester?.name || ''}
+                    aria-label="Reporter name"
+                    placeholder="Name"
+                    onBlur={e => {
+                      const v = e.target.value.trim();
+                      if (v !== (ticket.requester?.name || '')) patchRequester({ name: v });
+                    }}
+                    style={S.inlineEdit}
+                  />
+                  <input
+                    key={`reqemail-${ticket.id}`}
+                    defaultValue={ticket.requester?.email || ''}
+                    aria-label="Reporter email"
+                    placeholder="email@pomelo.com"
+                    type="email"
+                    onBlur={e => {
+                      const v = e.target.value.trim();
+                      if (v !== (ticket.requester?.email || '')) patchRequester({ email: v });
+                    }}
+                    style={{ ...S.inlineEdit, fontWeight: 400 }}
+                  />
+                </div>
+              ) : (
+                <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                  {ticket.requester?.name || '—'}
+                </span>
+              )}
             </div>
 
             {/* Labels — chip editor for staff/assignee, chips otherwise */}
@@ -5291,12 +5413,87 @@ function TicketDetail({
               </div>
             )}
 
+            {/* Category / Priority / Department / Shop / Platforms — inline
+                editable for admins (tickets.edit_all), read-only otherwise. */}
             {[
-              ['Category', ticket.category],
-              ['Priority', ticket.priority],
-              ['Department', ticket.department || '—'],
-              ['Shop', ticket.shop || '—'],
-              ['Platforms', ticket.platforms?.join(', ') || '—'],
+              { k: 'Category', field: 'category', value: ticket.category, type: 'text' },
+              {
+                k: 'Priority',
+                field: 'priority',
+                value: ticket.priority,
+                type: 'select',
+                options: ['Critical', 'High', 'Medium', 'Low'],
+              },
+              { k: 'Department', field: 'department', value: ticket.department, type: 'text' },
+              { k: 'Shop', field: 'shop', value: ticket.shop, type: 'text' },
+              { k: 'Platforms', field: 'platforms', value: ticket.platforms, type: 'platforms' },
+            ].map(({ k, field, value, type, options }) => (
+              <div
+                key={k}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '10px',
+                }}
+              >
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)', flexShrink: 0 }}>
+                  {k}
+                </span>
+                {canEditAll && type === 'select' ? (
+                  <select
+                    value={value || ''}
+                    onChange={e => patchTicket({ [field]: e.target.value })}
+                    aria-label={k}
+                    style={{
+                      ...S.select,
+                      width: 'auto',
+                      padding: '3px 24px 3px 8px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {options.map(o => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </select>
+                ) : canEditAll && type === 'platforms' ? (
+                  <input
+                    key={`platforms-${ticket.id}`}
+                    defaultValue={(ticket.platforms || []).join(', ')}
+                    aria-label="Platforms (comma separated)"
+                    placeholder="e.g. Shopify, iOS"
+                    onBlur={e => {
+                      const arr = e.target.value
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(Boolean);
+                      const prev = ticket.platforms || [];
+                      if (arr.join('|') !== prev.join('|')) patchTicket({ platforms: arr });
+                    }}
+                    style={S.inlineEdit}
+                  />
+                ) : canEditAll ? (
+                  <input
+                    key={`${field}-${ticket.id}`}
+                    defaultValue={value || ''}
+                    aria-label={k}
+                    onBlur={e => {
+                      const v = e.target.value.trim();
+                      if (v !== (value || '')) patchTicket({ [field]: v });
+                    }}
+                    style={S.inlineEdit}
+                  />
+                ) : (
+                  <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 700 }}>
+                    {type === 'platforms'
+                      ? (ticket.platforms || []).join(', ') || '—'
+                      : value || '—'}
+                  </span>
+                )}
+              </div>
+            ))}
+            {[
               ['Created', ticket.created],
               ['Last Updated', ticket.updated],
               ...(statusCategoryFor(ticket.status) === 'done'
@@ -5328,16 +5525,29 @@ function TicketDetail({
             >
               Description
             </div>
-            <div
-              style={{
-                fontSize: '13px',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.6,
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {ticket.description}
-            </div>
+            {canEditAll ? (
+              <textarea
+                key={`desc-${ticket.id}`}
+                defaultValue={ticket.description || ''}
+                aria-label="Ticket description"
+                onBlur={e => {
+                  const v = e.target.value;
+                  if (v !== (ticket.description || '')) patchTicket({ description: v });
+                }}
+                style={{ ...S.textarea, fontSize: '13px', minHeight: '90px', lineHeight: 1.6 }}
+              />
+            ) : (
+              <div
+                style={{
+                  fontSize: '13px',
+                  color: 'var(--text-secondary)',
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {ticket.description}
+              </div>
+            )}
           </div>
           {ticket.currentResult && (
             <div
@@ -6905,13 +7115,16 @@ function ProfileModal({ currentUser, setCurrentUser, onClose, onLogout }) {
           </div>
         </div>
 
-        {/* Avatar — overlapping header */}
+        {/* Avatar — overlapping header. position/zIndex ensure it paints
+            above the position:relative header instead of behind it. */}
         <div
           style={{
             display: 'flex',
             justifyContent: 'center',
             marginTop: '-32px',
             marginBottom: '16px',
+            position: 'relative',
+            zIndex: 1,
           }}
         >
           <div

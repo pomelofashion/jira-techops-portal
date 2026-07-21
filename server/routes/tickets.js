@@ -531,6 +531,12 @@ const patchSchema = z
     severity: severitySchema.nullable().optional(),
     majorIncident: z.boolean().optional(),
     postmortemDocId: z.string().uuid().nullable().optional(),
+    // Admin-only fields (gated below by tickets.edit_all).
+    department: z.string().max(120).nullable().optional(),
+    shop: z.string().max(120).nullable().optional(),
+    platforms: z.array(z.string().max(60)).max(40).optional(),
+    requesterName: z.string().max(120).nullable().optional(),
+    requesterEmail: z.union([z.string().email(), z.literal(''), z.null()]).optional(),
   })
   .strict();
 
@@ -575,6 +581,15 @@ router.patch('/:id', async (req, res, next) => {
       d.severity !== undefined || d.majorIncident !== undefined || d.postmortemDocId !== undefined;
     if (editsIncident && !can(req.user, 'incidents.manage'))
       return res.status(403).json({ error: 'Insufficient permissions to manage incidents.' });
+    // Requester/department/shop/platforms are admin-only edits (tickets.edit_all).
+    const editsAdminFields =
+      d.department !== undefined ||
+      d.shop !== undefined ||
+      d.platforms !== undefined ||
+      d.requesterName !== undefined ||
+      d.requesterEmail !== undefined;
+    if (editsAdminFields && !can(req.user, 'tickets.edit_all'))
+      return res.status(403).json({ error: 'Only admins can edit these ticket fields.' });
     if (d.parentId) {
       if (d.parentId === ticket.id)
         return res.status(400).json({ error: 'A ticket cannot be its own parent.' });
@@ -600,6 +615,10 @@ router.patch('/:id', async (req, res, next) => {
       ['severity', d.severity],
       ['major_incident', d.majorIncident],
       ['postmortem_doc_id', d.postmortemDocId],
+      ['department', d.department],
+      ['shop', d.shop],
+      ['requester_name', d.requesterName],
+      ['requester_email', d.requesterEmail === '' ? null : d.requesterEmail],
     ]) {
       if (val !== undefined) {
         params.push(val);
@@ -609,6 +628,10 @@ router.patch('/:id', async (req, res, next) => {
     if (d.labels !== undefined) {
       params.push(JSON.stringify(d.labels));
       sets.push(`labels = $${params.length}::jsonb`);
+    }
+    if (d.platforms !== undefined) {
+      params.push(JSON.stringify(d.platforms));
+      sets.push(`platforms = $${params.length}::jsonb`);
     }
     if (!sets.length) return res.json(serializeTicket(ticket));
     sets.push('updated_at = now()');

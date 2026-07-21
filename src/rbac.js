@@ -123,6 +123,13 @@ export const CAPABILITIES = Object.freeze([
     description: 'Post a comment or internal note on a ticket.',
   },
   {
+    id: 'tickets.edit_all',
+    group: 'Tickets',
+    label: 'Edit all ticket fields',
+    description:
+      'Edit every field on a ticket after creation — title, description, category, priority, department, shop, platforms, and requester. Admin-only.',
+  },
+  {
     id: 'incidents.manage',
     group: 'Tickets',
     label: 'Manage incidents',
@@ -284,6 +291,7 @@ export const SEED_ROLES = Object.freeze([
       'tickets.status_change_own',
       'tickets.delete',
       'tickets.comment',
+      'tickets.edit_all',
       'incidents.manage',
       'problems.manage',
       'changes.manage',
