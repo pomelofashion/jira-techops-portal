@@ -10,6 +10,6 @@ export default {
   PEM_URL: 'https://pem.pomelofashion.com/api/v2/email/custom',
   PEM_TEMPLATE_ID: '79254',
   EMAIL_FROM: 'no_reply@pmlo.co',
-  APP_URL: 'https://pomelo-techops-portal.vercel.app',
+  APP_URL: 'https://jira-techops-portal.vercel.app',
   NODE_ENV: 'production',
 };
