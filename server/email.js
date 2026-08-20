@@ -1,56 +1,82 @@
 // server/email.js
-// Transactional email for verification, invites, and password resets.
+// Transactional email via Pomelo Email Manager (PEM).
 //
-// Provider: Resend (called over plain fetch — no SDK dependency). If no
-// RESEND_API_KEY is configured, emails are logged to stdout instead so the
-// flows are fully testable in dev (the link appears in the server log).
+// Endpoint: POST https://pem.pomelofashion.com/api/v2/email/custom
+// Uses template_id 79254 with a dynamic "body" attribute for HTML content.
+// If PEM_ENABLED is explicitly set to 'false', emails are logged to stdout
+// instead so the flows are fully testable in dev.
 
-const FROM = process.env.EMAIL_FROM || 'TechOps <onboarding@resend.dev>';
+const PEM_URL = process.env.PEM_URL || 'https://pem.pomelofashion.com/api/v2/email/custom';
+const PEM_TEMPLATE_ID = Number(process.env.PEM_TEMPLATE_ID) || 79254;
+const FROM_EMAIL = process.env.EMAIL_FROM || 'no_reply@pmlo.co';
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 
-async function deliver({ to, subject, html, text }) {
-  if (!process.env.RESEND_API_KEY) {
+// Strip HTML tags to produce a plain-text fallback — reduces spam score.
+function stripHtml(html) {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function deliver({ to, subject, html, cc }) {
+  if (process.env.PEM_ENABLED === 'false') {
     console.log(
-      JSON.stringify({ level: 'info', msg: 'email (dev log — no provider)', to, subject, text })
+      JSON.stringify({ level: 'info', msg: 'email (dev log — PEM disabled)', to, subject })
     );
     return { delivered: false, dev: true };
   }
-  const resp = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
+
+  const plainText = stripHtml(html);
+
+  const payload = {
+    from_email: FROM_EMAIL,
+    to,
+    ...(cc && { cc }),
+    template_id: PEM_TEMPLATE_ID,
+    subject,
+    file_path: '',
+    attributes: {
+      body: html,
+      plain_text: plainText,
     },
-    body: JSON.stringify({ from: FROM, to, subject, html, text }),
+  };
+
+  const resp = await fetch(PEM_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
+
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
-    throw new Error(`Email send failed (${resp.status}): ${detail.slice(0, 200)}`);
+    throw new Error(`PEM email send failed (${resp.status}): ${detail.slice(0, 200)}`);
   }
   return { delivered: true };
 }
 
-const wrap = (heading, body, cta) => `
-  <div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px">
-    <h2 style="color:#111">${heading}</h2>
-    <p style="color:#444;line-height:1.6">${body}</p>
-    ${cta ? `<p><a href="${cta.href}" style="display:inline-block;background:#6366F1;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">${cta.label}</a></p>` : ''}
-    <p style="color:#999;font-size:12px;margin-top:24px">Pomelo TechOps Portal</p>
-  </div>`;
+const wrap = (heading, body, cta) => `<div style="font-family:Inter,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#333">
+<h2 style="color:#111;font-size:18px;margin-bottom:12px">${heading}</h2>
+<p style="color:#444;line-height:1.6;font-size:14px;margin-bottom:16px">${body}</p>
+${cta ? `<p style="margin:20px 0"><a href="${cta.href}" style="display:inline-block;background:#6366F1;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-size:14px">${cta.label}</a></p>` : ''}
+<p style="color:#999;font-size:11px;margin-top:32px;border-top:1px solid #eee;padding-top:12px">Pomelo TechOps Portal<br>This is an automated notification. If you believe you received this in error, please contact your IT team.</p>
+</div>`;
 
 export function sendVerifyEmail(to, token) {
   const href = `${APP_URL}/verify?token=${token}`;
   return deliver({
     to,
     subject: 'Verify your TechOps account',
-    text: `Verify your account: ${href}`,
     html: wrap(
       'Verify your account',
       'Confirm your email to finish setting up your TechOps account.',
-      {
-        href,
-        label: 'Verify email',
-      }
+      { href, label: 'Verify email' }
     ),
   });
 }
@@ -60,17 +86,14 @@ export function sendInviteEmail(to, token, roleLabel) {
   return deliver({
     to,
     subject: "You've been invited to the TechOps Portal",
-    text: `Accept your invite: ${href}`,
     html: wrap(
-      'You’ve been invited',
+      'You've been invited',
       `You've been invited to the Pomelo TechOps Portal as <b>${roleLabel || 'a member'}</b>. Set your password to get started.`,
       { href, label: 'Accept invite' }
     ),
   });
 }
 
-// SLA warning/breach notice for assignees and watchers. kind is
-// 'approaching' | 'breached'; metric is 'response' | 'resolution'.
 export function sendSlaEmail(to, ticketKey, ticketTitle, kind, metric) {
   const href = `${APP_URL}/#board`;
   const subject =
@@ -80,7 +103,6 @@ export function sendSlaEmail(to, ticketKey, ticketTitle, kind, metric) {
   return deliver({
     to,
     subject,
-    text: `${subject} — ${ticketTitle}. ${href}`,
     html: wrap(
       kind === 'breached' ? 'SLA breached' : 'SLA at risk',
       `<b>${ticketKey}</b> — ${ticketTitle}<br/>The ${metric} SLA target ${
@@ -91,13 +113,11 @@ export function sendSlaEmail(to, ticketKey, ticketTitle, kind, metric) {
   });
 }
 
-// Approval request → the designated approver.
 export function sendApprovalEmail(to, ticketKey, ticketTitle, requestedBy) {
   const href = `${APP_URL}/#approvals`;
   return deliver({
     to,
     subject: `Approval needed: ${ticketKey}`,
-    text: `${requestedBy} requested your approval on ${ticketKey} — ${ticketTitle}. ${href}`,
     html: wrap(
       'Approval needed',
       `<b>${ticketKey}</b> — ${ticketTitle}<br/>Requested by ${requestedBy}.`,
@@ -106,28 +126,24 @@ export function sendApprovalEmail(to, ticketKey, ticketTitle, requestedBy) {
   });
 }
 
-// Decision → the requester.
 export function sendApprovalDecidedEmail(to, ticketKey, ticketTitle, decision, comment) {
   const href = `${APP_URL}/#mytickets`;
   return deliver({
     to,
     subject: `${ticketKey} ${decision}`,
-    text: `Your request ${ticketKey} — ${ticketTitle} was ${decision}.${comment ? ` Comment: ${comment}` : ''} ${href}`,
     html: wrap(
       `Request ${decision}`,
-      `<b>${ticketKey}</b> — ${ticketTitle}<br/>${comment ? `Approver comment: “${comment}”` : ''}`,
+      `<b>${ticketKey}</b> — ${ticketTitle}<br/>${comment ? `Approver comment: "${comment}"` : ''}`,
       { href, label: 'View your tickets' }
     ),
   });
 }
 
-// CSAT survey → the requester after resolution.
 export function sendCsatEmail(to, ticketKey, ticketTitle, token) {
   const href = `${APP_URL}/#csat?token=${token}`;
   return deliver({
     to,
     subject: `How did we do on ${ticketKey}?`,
-    text: `Your request ${ticketKey} — ${ticketTitle} was resolved. Rate the support you received: ${href}`,
     html: wrap(
       'How did we do?',
       `<b>${ticketKey}</b> — ${ticketTitle} has been resolved. We'd love a quick rating.`,
@@ -141,10 +157,9 @@ export function sendResetEmail(to, token) {
   return deliver({
     to,
     subject: 'Reset your TechOps password',
-    text: `Reset your password: ${href}`,
     html: wrap(
       'Reset your password',
-      'We received a request to reset your password. This link expires in 1 hour. If you didn’t ask for this, ignore this email.',
+      'We received a request to reset your password. This link expires in 1 hour. If you didn\'t ask for this, ignore this email.',
       { href, label: 'Reset password' }
     ),
   });
