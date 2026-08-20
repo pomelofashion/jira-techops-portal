@@ -87,7 +87,7 @@ export function sendInviteEmail(to, token, roleLabel) {
     to,
     subject: "You've been invited to the TechOps Portal",
     html: wrap(
-      'You've been invited',
+      "You've been invited",
       `You've been invited to the Pomelo TechOps Portal as <b>${roleLabel || 'a member'}</b>. Set your password to get started.`,
       { href, label: 'Accept invite' }
     ),
