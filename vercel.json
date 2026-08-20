@@ -5,8 +5,7 @@
   "functions": {
     "api/**/*.js": {
       "memory": 1024,
-      "maxDuration": 30,
-      "includeFiles": ".env.production"
+      "maxDuration": 30
     }
   },
   "rewrites": [

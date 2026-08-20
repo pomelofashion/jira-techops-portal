@@ -50,8 +50,7 @@ import { startSlaSweeper } from './lib/slaSweeper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: resolve(__dirname, '..', '.env.local') });
-// Also load .env.production as fallback (committed to repo for Vercel deploys)
-dotenvConfig({ path: resolve(__dirname, '..', '.env.production') });
+// config.json is already loaded by db.js (imported above) via loadConfig.js
 
 // ─── Structured logging + Sentry init ─────────────────────────────────────────
 // Emits one-line JSON to stdout. Sentry capture is enabled when SENTRY_DSN is
