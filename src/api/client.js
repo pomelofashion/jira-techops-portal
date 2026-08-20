@@ -1,16 +1,12 @@
 // src/api/client.js
-// Shared HTTP client base for every API module (docs, auth, tickets, users,
-// roles, audit). One axios instance, one error-envelope reader, one mock flag.
-//
-// Backend mode is a single switch: set VITE_API_BASE_URL and every API module
-// talks to the BFF; leave it blank and they fall back to mock/localStorage
-// behaviour. withCredentials is required — the session is an httpOnly cookie.
+// Shared HTTP client for all API modules. In production, always talks to the
+// real backend — mock/localStorage mode is dev-only.
 
 import axios from 'axios';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-export const API_ENABLED = Boolean(BASE_URL);
-export const USE_MOCK = !API_ENABLED;
+export const API_ENABLED = true;
+export const USE_MOCK = false;
 
 export const api = axios.create({
   baseURL: BASE_URL,
