@@ -19,10 +19,18 @@ import { config as dotenvConfig } from 'dotenv';
 // loading here guarantees DATABASE_URL is visible regardless of import order.
 dotenvConfig({ path: resolve(dirname(fileURLToPath(import.meta.url)), '..', '.env.local') });
 
+// Vercel Neon integration injects POSTGRES_URL; this app expects DATABASE_URL.
+// Accept either without requiring manual aliasing in the dashboard.
+if (!process.env.DATABASE_URL && process.env.POSTGRES_URL) {
+  process.env.DATABASE_URL = process.env.POSTGRES_URL;
+}
+
 export const dbEnabled = Boolean(process.env.DATABASE_URL);
 
 // Managed Postgres providers (Render, Neon, Supabase, RDS) require TLS. Allow
 // self-signed chains in those managed environments unless explicitly disabled.
+// Neon's pooler uses channel_binding=require which works with the default
+// Node TLS stack; we only need rejectUnauthorized:false for self-signed certs.
 const ssl =
   process.env.DATABASE_SSL === 'disable'
     ? false

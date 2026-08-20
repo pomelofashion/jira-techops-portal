@@ -75,7 +75,7 @@ if (process.env.VITE_ANTHROPIC_API_KEY || process.env.VITE_JIRA_API_TOKEN) {
 }
 
 const isProduction = process.env.NODE_ENV === 'production';
-if (isProduction && !process.env.ALLOWED_ORIGIN) {
+if (isProduction && !process.env.ALLOWED_ORIGIN && !process.env.VERCEL) {
   console.error('[BFF] ✖  Refusing to start: ALLOWED_ORIGIN must be set in production.');
   process.exit(1);
 }
@@ -93,7 +93,9 @@ app.use(helmet());
 // ALLOWED_ORIGIN accepts a comma-separated list (e.g. staging + production).
 // credentials:true is required for the httpOnly session cookie to cross
 // origins; cookies also require an exact origin match, never a wildcard.
-const allowedOrigins = (process.env.ALLOWED_ORIGIN || 'http://localhost:5173')
+// On Vercel, derive from VERCEL_URL if ALLOWED_ORIGIN isn't explicitly set.
+const vercelOrigin = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
+const allowedOrigins = (process.env.ALLOWED_ORIGIN || vercelOrigin || 'http://localhost:5173')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
@@ -147,9 +149,15 @@ if (dbEnabled) {
   app.use('/api/changes', changesRouter);
   app.use('/api/csat', csatRouter);
   app.use('/api/reports', reportsRouter);
-  startSlaSweeper();
+  // SLA sweeper: only start the in-process interval when running as a
+  // persistent server (not on Vercel). On Vercel the sweeper runs via cron
+  // hitting /api/cron/sla-sweep instead.
+  if (!process.env.VERCEL) {
+    startSlaSweeper();
+  }
   console.log(
-    '[BFF] DB-backed routes mounted: /api/auth, /api/tickets, /api/users, /api/roles, /api/audit, /api/docs, /api/request-types, /api/sla, /api/notifications (SLA sweeper on)'
+    '[BFF] DB-backed routes mounted: /api/auth, /api/tickets, /api/users, /api/roles, /api/audit, /api/docs, /api/request-types, /api/sla, /api/notifications' +
+      (process.env.VERCEL ? '' : ' (SLA sweeper on)')
   );
 }
 
@@ -204,11 +212,20 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: status >= 500 ? 'Internal server error.' : err.message });
 });
 
-app.listen(PORT, () => {
-  console.log(`[BFF] Pomelo TechOps API proxy → http://localhost:${PORT}`);
-  console.log(`[BFF] NODE_ENV:             ${process.env.NODE_ENV || 'development'}`);
-  console.log(`[BFF] Allowed origins:      ${allowedOrigins.join(', ')}`);
-  console.log(
-    `[BFF] Database:             ${dbEnabled ? 'configured' : 'not configured (DATABASE_URL unset)'}`
-  );
-});
+// ─── Export for Vercel serverless + local dev listen ──────────────────────────
+// When imported by the Vercel adapter (api/index.js) the app is used as a
+// request handler — no listen(). When run directly (npm start / npm run server)
+// we bind to a port as before.
+export default app;
+
+const isVercel = Boolean(process.env.VERCEL);
+if (!isVercel) {
+  app.listen(PORT, () => {
+    console.log(`[BFF] Pomelo TechOps API proxy → http://localhost:${PORT}`);
+    console.log(`[BFF] NODE_ENV:             ${process.env.NODE_ENV || 'development'}`);
+    console.log(`[BFF] Allowed origins:      ${allowedOrigins.join(', ')}`);
+    console.log(
+      `[BFF] Database:             ${dbEnabled ? 'configured' : 'not configured (DATABASE_URL unset)'}`
+    );
+  });
+}
