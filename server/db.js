@@ -18,6 +18,8 @@ import { config as dotenvConfig } from 'dotenv';
 // also call dotenvConfig, but ESM hoisting runs this module before their calls;
 // loading here guarantees DATABASE_URL is visible regardless of import order.
 dotenvConfig({ path: resolve(dirname(fileURLToPath(import.meta.url)), '..', '.env.local') });
+// Also load .env.production as fallback (committed to repo for Vercel deploys)
+dotenvConfig({ path: resolve(dirname(fileURLToPath(import.meta.url)), '..', '.env.production') });
 
 // Vercel Neon integration injects POSTGRES_URL; this app expects DATABASE_URL.
 // Accept either without requiring manual aliasing in the dashboard.
