@@ -45,11 +45,11 @@ const adfParagraph = text => ({
 
 /**
  * Map our priority labels to Jira priority names.
- * Jira accepts: Highest, High, Medium, Low, Lowest
+ * PESD1 project priorities: Critical, High, Medium, Low
  */
 const toJiraPriority = priority => {
   const map = {
-    Critical: 'Highest',
+    Critical: 'Critical',
     High: 'High',
     Medium: 'Medium',
     Low: 'Low',
