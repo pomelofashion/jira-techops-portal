@@ -151,7 +151,7 @@ test.describe('Backend QA — Ticket Submission & Default Assignment', () => {
     await page.fill('textarea[placeholder^="What should be happening"]', 'Test expected state');
 
     // Required fields — without these, validation blocks submit/navigation.
-    await page.locator('label:has-text("Shopify")').first().click();
+    await page.locator('label:has-text("Apollo")').first().click();
     await page.locator('select', { has: page.locator('option:text-is("Select shop")') }).selectOption('Pomelo TH');
     await page.locator('select', { has: page.locator('option:text-is("Select department")') }).selectOption('Tech & Engineering');
     await page.locator('select', { has: page.locator('option:text-is("Select priority")') }).selectOption('Medium');
@@ -197,7 +197,7 @@ test.describe('Backend QA — Ticket Submission & Default Assignment', () => {
     await page.fill('textarea[placeholder^="What should be happening"]', 'auto-assigned');
 
     // Required fields — without these, validation blocks submit/navigation.
-    await page.locator('label:has-text("Shopify")').first().click();
+    await page.locator('label:has-text("Apollo")').first().click();
     await page.locator('select', { has: page.locator('option:text-is("Select shop")') }).selectOption('Pomelo TH');
     await page.locator('select', { has: page.locator('option:text-is("Select department")') }).selectOption('Tech & Engineering');
     await page.locator('select', { has: page.locator('option:text-is("Select priority")') }).selectOption('Medium');

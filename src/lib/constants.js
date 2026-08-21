@@ -172,16 +172,20 @@ export const PROBLEM_CATEGORIES = [
 ];
 
 export const PLATFORMS = [
-  'Shopify',
-  'Lazada',
-  'Shopee',
-  'TikTok Shop',
-  'Amazon',
-  'Tmall',
-  'JD.com',
-  'Nykaa',
-  'Internal Tools',
-  'Other',
+  'Apollo',
+  'NetSuite',
+  'Henry',
+  'API',
+  'Android App',
+  'iOS App',
+  'iOS Web',
+  'Android Web',
+  'Website',
+  'Marketplace',
+  'Superset',
+  'Store Fulfillment',
+  'Netcore',
+  'POMQ POS',
 ];
 
 export const SHOPS = [
