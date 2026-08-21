@@ -34,7 +34,7 @@ async function notify(ticket, kind, metric) {
   }
 }
 
-async function sweepOnce() {
+export async function sweepOnce() {
   // Open, unpaused tickets with at least one live deadline.
   const { rows } = await query(
     `SELECT id, key, title, priority, assignee_email, watchers, created_at,
