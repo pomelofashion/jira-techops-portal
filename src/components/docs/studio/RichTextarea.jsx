@@ -1,13 +1,26 @@
 // src/components/docs/studio/RichTextarea.jsx
 // A Markdown <textarea> with a Confluence-style formatting toolbar, a slash (/)
-// command menu, and keyboard shortcuts. Produces Markdown — no contentEditable,
-// no new dependencies. Used by the Documentation Studio editor.
+// command menu, a floating selection toolbar, smart list/table keystrokes,
+// paste-HTML→Markdown, inline image paste/drop, and keyboard shortcuts.
+// Produces Markdown — no contentEditable, no new dependencies.
+// Used by the Documentation Studio editor.
 
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { S } from '../../../lib/styles.js';
 import { wrapSelection, prefixLines, insertBlock, BLOCK_SNIPPETS } from './editorActions.js';
+import { htmlToMd } from '../../../lib/htmlToMd.js';
+import { compressImageToDataUrl } from '../../../lib/imageUtil.js';
+import { TEMPLATES } from './templates.js';
+
+// Server caps doc content at 200,000 chars (server/routes/docs.js writeSchema).
+// Refuse inserts that would push past the guard, and warn from the soft line.
+export const CONTENT_MAX = 200000;
+export const CONTENT_SOFT_WARN = 150000;
+const CONTENT_INSERT_GUARD = 180000;
 
 // Every command can be triggered from the toolbar and/or the slash menu.
 // run(value, start, end) → { value, selStart, selEnd }
+// `keywords` widens slash-menu filtering to synonyms.
 const COMMANDS = [
   {
     id: 'h1',
@@ -15,6 +28,7 @@ const COMMANDS = [
     icon: 'H1',
     group: 'text',
     slash: true,
+    keywords: 'title',
     run: (v, s, e) => prefixLines(v, s, e, '# '),
   },
   {
@@ -23,6 +37,7 @@ const COMMANDS = [
     icon: 'H2',
     group: 'text',
     slash: true,
+    keywords: 'subtitle section',
     run: (v, s, e) => prefixLines(v, s, e, '## '),
   },
   {
@@ -31,6 +46,7 @@ const COMMANDS = [
     icon: 'H3',
     group: 'text',
     slash: true,
+    keywords: 'subsection',
     run: (v, s, e) => prefixLines(v, s, e, '### '),
   },
   {
@@ -68,6 +84,7 @@ const COMMANDS = [
     label: 'Inline code',
     icon: '</>',
     group: 'inline',
+    keywords: 'mono',
     run: (v, s, e) => wrapSelection(v, s, e, '`', '`', 'code'),
   },
   {
@@ -77,6 +94,7 @@ const COMMANDS = [
     group: 'inline',
     tip: '⌘K',
     slash: true,
+    keywords: 'url href',
     run: (v, s, e) => {
       const sel = v.slice(s, e) || 'link text';
       const txt = `[${sel}](https://)`;
@@ -93,6 +111,7 @@ const COMMANDS = [
     icon: '•',
     group: 'list',
     slash: true,
+    keywords: 'ul unordered',
     run: (v, s, e) => prefixLines(v, s, e, '- '),
   },
   {
@@ -101,6 +120,7 @@ const COMMANDS = [
     icon: '1.',
     group: 'list',
     slash: true,
+    keywords: 'ol ordered',
     run: (v, s, e) => prefixLines(v, s, e, '', true),
   },
   {
@@ -109,6 +129,7 @@ const COMMANDS = [
     icon: '☑',
     group: 'list',
     slash: true,
+    keywords: 'todo checkbox checklist',
     run: (v, s, e) => prefixLines(v, s, e, '- [ ] '),
   },
   {
@@ -117,6 +138,7 @@ const COMMANDS = [
     icon: '❝',
     group: 'block',
     slash: true,
+    keywords: 'blockquote cite',
     run: (v, s, e) => prefixLines(v, s, e, '> '),
   },
   {
@@ -125,6 +147,7 @@ const COMMANDS = [
     icon: '{ }',
     group: 'block',
     slash: true,
+    keywords: 'snippet fence pre',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.codeblock),
   },
   {
@@ -133,6 +156,7 @@ const COMMANDS = [
     icon: '▦',
     group: 'block',
     slash: true,
+    keywords: 'grid columns rows',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.table),
   },
   {
@@ -141,7 +165,17 @@ const COMMANDS = [
     icon: 'ℹ️',
     group: 'callout',
     slash: true,
+    keywords: 'callout panel',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.info),
+  },
+  {
+    id: 'note',
+    label: 'Note panel',
+    icon: '📝',
+    group: 'callout',
+    slash: true,
+    keywords: 'callout remember',
+    run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.note),
   },
   {
     id: 'warning',
@@ -149,6 +183,7 @@ const COMMANDS = [
     icon: '⚠️',
     group: 'callout',
     slash: true,
+    keywords: 'callout warn caution',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.warning),
   },
   {
@@ -157,7 +192,17 @@ const COMMANDS = [
     icon: '✅',
     group: 'callout',
     slash: true,
+    keywords: 'callout done win',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.success),
+  },
+  {
+    id: 'error',
+    label: 'Error panel',
+    icon: '⛔',
+    group: 'callout',
+    slash: true,
+    keywords: 'callout danger avoid',
+    run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.error),
   },
   {
     id: 'tip',
@@ -165,6 +210,7 @@ const COMMANDS = [
     icon: '💡',
     group: 'callout',
     slash: true,
+    keywords: 'callout hint',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.tip),
   },
   {
@@ -173,6 +219,7 @@ const COMMANDS = [
     icon: '🖼️',
     group: 'block',
     slash: true,
+    keywords: 'picture photo',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.image),
   },
   {
@@ -181,11 +228,41 @@ const COMMANDS = [
     icon: '―',
     group: 'block',
     slash: true,
+    keywords: 'hr line separator rule',
     run: (v, s, e) => insertBlock(v, s, e, BLOCK_SNIPPETS.divider),
   },
+  {
+    id: 'date',
+    label: "Today's date",
+    icon: '📅',
+    group: 'block',
+    slash: true,
+    keywords: 'time stamp today now',
+    run: (v, s, e) => {
+      const d = new Date().toISOString().slice(0, 10);
+      return {
+        value: v.slice(0, s) + d + v.slice(e),
+        selStart: s + d.length,
+        selEnd: s + d.length,
+      };
+    },
+  },
 ];
-const CMD = Object.fromEntries(COMMANDS.map(c => [c.id, c]));
-const SLASH_COMMANDS = COMMANDS.filter(c => c.slash);
+
+// Starter templates double as slash-insertable snippets (/template-runbook…).
+const TEMPLATE_COMMANDS = TEMPLATES.filter(t => t.id !== 'blank' && t.content).map(t => ({
+  id: `template-${t.id}`,
+  label: `Template: ${t.name}`,
+  icon: '📋',
+  group: 'template',
+  slash: true,
+  keywords: `template snippet ${t.id}`,
+  run: (v, s, e) => insertBlock(v, s, e, t.content),
+}));
+
+const ALL_COMMANDS = [...COMMANDS, ...TEMPLATE_COMMANDS];
+const CMD = Object.fromEntries(ALL_COMMANDS.map(c => [c.id, c]));
+const SLASH_COMMANDS = ALL_COMMANDS.filter(c => c.slash);
 
 const TOOLBAR_GROUPS = [
   ['h1', 'h2', 'h3'],
@@ -195,28 +272,26 @@ const TOOLBAR_GROUPS = [
   ['info', 'warning', 'success', 'image', 'divider'],
 ];
 
-const btnStyle = {
-  minWidth: '28px',
-  height: '28px',
-  padding: '0 7px',
-  borderRadius: '6px',
-  border: '1px solid transparent',
-  background: 'transparent',
-  color: 'var(--text-secondary)',
-  cursor: 'pointer',
-  fontSize: '12px',
-  fontWeight: 700,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontFamily: "'Inter', sans-serif",
-};
+const btnStyle = { ...S.toolbarBtn }; // shared token — see src/lib/styles.js
 
-export default function RichTextarea({ value, onChange, placeholder, style, taRef: externalRef }) {
+const LIST_PREFIX_RE = /^(\s*)([-*](?:\s\[[ x]\])?|\d+\.)\s(.*)$/;
+const TABLE_ROW_RE = /^\|.*\|\s*$/;
+const BLOCK_HTML_RE = /<(h[1-6]|p|ul|ol|li|table|blockquote|pre)\b/i;
+
+export default function RichTextarea({
+  value,
+  onChange,
+  placeholder,
+  style,
+  taRef: externalRef,
+  onNotify,
+  onScroll,
+}) {
   const innerRef = useRef(null);
   const taRef = externalRef || innerRef;
   const pendingSel = useRef(null);
   const [slash, setSlash] = useState(null); // { query, from, top, left, index } | null
+  const [bubble, setBubble] = useState(null); // { top, left } | null
 
   // Restore caret/selection after a programmatic value change.
   useEffect(() => {
@@ -241,8 +316,75 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
     [value, onChange, taRef]
   );
 
+  // Native-undo-friendly insertion: execCommand keeps the textarea's built-in
+  // undo stack; setRangeText is the fallback when a browser refuses it.
+  const insertNative = useCallback(
+    (text, selStart, selEnd) => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      if (selStart != null) ta.setSelectionRange(selStart, selEnd != null ? selEnd : selStart);
+      let ok = false;
+      try {
+        ok = document.execCommand('insertText', false, text);
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end');
+        onChange(ta.value);
+      }
+    },
+    [onChange, taRef]
+  );
+
+  const deleteRangeNative = useCallback(
+    (from, to) => {
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(from, to);
+      let ok = false;
+      try {
+        ok = document.execCommand('delete', false);
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        ta.setRangeText('', from, to, 'end');
+        onChange(ta.value);
+      }
+    },
+    [onChange, taRef]
+  );
+
+  // Compress + inline an image as a Markdown data-URL image.
+  const insertImageFile = useCallback(
+    async file => {
+      try {
+        const dataUrl = await compressImageToDataUrl(file);
+        const name =
+          (file.name || 'image').replace(/\.[a-z0-9]+$/i, '').replace(/[[\]()]/g, '') || 'image';
+        const snippet = `\n\n![${name}](${dataUrl})\n\n`;
+        if (value.length + snippet.length > CONTENT_INSERT_GUARD) {
+          onNotify?.(
+            'Image too large to embed in this page — upload it via the Documentation library instead.',
+            'error'
+          );
+          return;
+        }
+        insertNative(snippet);
+      } catch {
+        onNotify?.('Could not read that image.', 'error');
+      }
+    },
+    [value, insertNative, onNotify]
+  );
+
   const filtered = slash
-    ? SLASH_COMMANDS.filter(c => c.label.toLowerCase().includes(slash.query.toLowerCase()))
+    ? SLASH_COMMANDS.filter(c =>
+        `${c.label} ${c.keywords || ''} ${c.id}`.toLowerCase().includes(slash.query.toLowerCase())
+      )
     : [];
 
   const runSlash = useCallback(
@@ -259,6 +401,42 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
     },
     [slash, value, onChange, taRef]
   );
+
+  // Next/previous pipe-table cell relative to `from`; returns trimmed [start, end].
+  const nextCell = from => {
+    let q = value.indexOf('|', from);
+    while (q !== -1) {
+      const end = value.indexOf('|', q + 1);
+      if (end === -1) return null;
+      const seg = value.slice(q + 1, end);
+      if (!seg.includes('\n')) {
+        let a = q + 1;
+        let b = end;
+        while (a < b && /\s/.test(value[a])) a++;
+        while (b > a && /\s/.test(value[b - 1])) b--;
+        return [a, b];
+      }
+      q = end;
+    }
+    return null;
+  };
+  const prevCell = from => {
+    let r = value.lastIndexOf('|', from - 1);
+    while (r > 0) {
+      const p = value.lastIndexOf('|', r - 1);
+      if (p === -1) return null;
+      const seg = value.slice(p + 1, r);
+      if (!seg.includes('\n')) {
+        let a = p + 1;
+        let b = r;
+        while (a < b && /\s/.test(value[a])) a++;
+        while (b > a && /\s/.test(value[b - 1])) b--;
+        return [a, b];
+      }
+      r = p;
+    }
+    return null;
+  };
 
   const onKeyDown = e => {
     // Slash-menu navigation takes priority when open.
@@ -284,6 +462,62 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
         return;
       }
     }
+    if (e.key === 'Escape' && bubble) {
+      setBubble(null);
+      return;
+    }
+    const ta = e.target;
+    const caret = ta.selectionStart;
+    const collapsed = caret === ta.selectionEnd;
+
+    // Smart list continuation / table rows on Enter.
+    if (e.key === 'Enter' && collapsed && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      const lineStart = value.lastIndexOf('\n', caret - 1) + 1;
+      let lineEnd = value.indexOf('\n', caret);
+      if (lineEnd === -1) lineEnd = value.length;
+      const fullLine = value.slice(lineStart, lineEnd);
+
+      // Enter at the end of a table row → new empty row with same column count.
+      if (TABLE_ROW_RE.test(fullLine) && caret === lineEnd) {
+        e.preventDefault();
+        const cols = Math.max(1, fullLine.split('|').length - 2);
+        insertNative('\n|' + ' |'.repeat(cols));
+        return;
+      }
+
+      const beforeCaret = value.slice(lineStart, caret);
+      const m = beforeCaret.match(LIST_PREFIX_RE);
+      if (m) {
+        e.preventDefault();
+        if (!m[3].trim()) {
+          // Empty list item → exit the list (remove the dangling prefix).
+          deleteRangeNative(lineStart, caret);
+          return;
+        }
+        let prefix = m[2];
+        const num = prefix.match(/^(\d+)\.$/);
+        if (num) prefix = `${Number(num[1]) + 1}.`;
+        prefix = prefix.replace('[x]', '[ ]');
+        insertNative(`\n${m[1]}${prefix} `);
+        return;
+      }
+    }
+
+    // Tab / Shift+Tab hop between table cells.
+    if (e.key === 'Tab' && collapsed) {
+      const lineStart = value.lastIndexOf('\n', caret - 1) + 1;
+      let lineEnd = value.indexOf('\n', caret);
+      if (lineEnd === -1) lineEnd = value.length;
+      if (TABLE_ROW_RE.test(value.slice(lineStart, lineEnd))) {
+        const cell = e.shiftKey ? prevCell(caret) : nextCell(caret);
+        if (cell) {
+          e.preventDefault();
+          ta.setSelectionRange(cell[0], cell[1]);
+          return;
+        }
+      }
+    }
+
     // Keyboard shortcuts.
     if (e.metaKey || e.ctrlKey) {
       const k = e.key.toLowerCase();
@@ -313,7 +547,7 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
     onChange(val);
     // Find a "/" that starts a command token: preceded by start-of-line or space.
     const uptoCaret = val.slice(0, caret);
-    const m = uptoCaret.match(/(^|\s)\/([\w]*)$/);
+    const m = uptoCaret.match(/(^|\s)\/([\w-]*)$/);
     if (m) {
       const from = caret - m[2].length - 1; // position of "/"
       const coords = caretCoords(ta, from);
@@ -322,6 +556,51 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
       setSlash(null);
     }
   };
+
+  // Floating selection toolbar: show a formatting bubble over the selection.
+  const updateBubble = () => {
+    const ta = taRef.current;
+    if (!ta) return;
+    if (ta.selectionEnd > ta.selectionStart && document.activeElement === ta) {
+      const c = caretCoords(ta, ta.selectionStart);
+      setBubble({ top: Math.max(c.top - 46, 2), left: Math.min(c.left, 420) });
+    } else if (bubble) {
+      setBubble(null);
+    }
+  };
+
+  // Paste: images become inline data-URLs; rich HTML converts to Markdown.
+  const onPaste = e => {
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const imgFile = Array.from(cd.files || []).find(f => f.type.startsWith('image/'));
+    if (imgFile) {
+      e.preventDefault();
+      insertImageFile(imgFile);
+      return;
+    }
+    const html = cd.getData('text/html');
+    if (html && BLOCK_HTML_RE.test(html)) {
+      const md = htmlToMd(html);
+      if (md) {
+        e.preventDefault();
+        insertNative(md);
+      }
+    }
+  };
+
+  const onDrop = e => {
+    const f = Array.from(e.dataTransfer?.files || []).find(x => x.type.startsWith('image/'));
+    if (f) {
+      e.preventDefault();
+      insertImageFile(f);
+    }
+  };
+  const onDragOver = e => {
+    if (Array.from(e.dataTransfer?.items || []).some(x => x.kind === 'file')) e.preventDefault();
+  };
+
+  const words = value.trim() ? value.trim().split(/\s+/).length : 0;
 
   return (
     <div
@@ -333,7 +612,7 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
         position: 'relative',
       }}
     >
-      {/* Toolbar */}
+      {/* Toolbar — always visible: the textarea scrolls internally below it. */}
       <div
         style={{
           display: 'flex',
@@ -388,7 +667,7 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
           </div>
         ))}
         <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-          Type <b>/</b> for blocks
+          Type <b>/</b> for blocks · paste or drop images
         </span>
       </div>
 
@@ -398,7 +677,16 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
         value={value}
         onChange={handleChange}
         onKeyDown={onKeyDown}
-        onScroll={() => slash && setSlash(null)}
+        onSelect={updateBubble}
+        onBlur={() => setBubble(null)}
+        onPaste={onPaste}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onScroll={() => {
+          if (slash) setSlash(null);
+          if (bubble) setBubble(null);
+          onScroll?.();
+        }}
         placeholder={placeholder}
         spellCheck
         style={{
@@ -415,6 +703,73 @@ export default function RichTextarea({ value, onChange, placeholder, style, taRe
           ...style,
         }}
       />
+
+      {/* Footer: word count, reading time, content budget */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '12px',
+          alignItems: 'center',
+          padding: '4px 12px',
+          borderTop: '1px solid var(--border-subtle)',
+          background: 'var(--bg-surface)',
+          fontSize: '11px',
+          color: 'var(--text-muted)',
+        }}
+      >
+        <span>
+          {words.toLocaleString()} words · {Math.max(1, Math.ceil(words / 200))} min read
+        </span>
+        {value.length > CONTENT_SOFT_WARN && (
+          <span style={{ color: '#D97706', fontWeight: 700 }}>
+            {Math.round(value.length / 1000)}K / {CONTENT_MAX / 1000}K chars
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto' }}>Markdown</span>
+      </div>
+
+      {/* Floating selection toolbar */}
+      {bubble && (
+        <div
+          role="toolbar"
+          aria-label="Format selection"
+          style={{
+            position: 'absolute',
+            top: bubble.top,
+            left: bubble.left,
+            zIndex: 60,
+            display: 'flex',
+            gap: '1px',
+            padding: '3px',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-strong)',
+            borderRadius: '8px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+          }}
+        >
+          {['bold', 'italic', 'code', 'link'].map(id => {
+            const c = CMD[id];
+            return (
+              <button
+                key={id}
+                type="button"
+                title={c.label + (c.tip ? ` (${c.tip})` : '')}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  apply(c);
+                  setBubble(null);
+                }}
+                style={{
+                  ...btnStyle,
+                  fontStyle: id === 'italic' ? 'italic' : 'normal',
+                }}
+              >
+                {c.icon}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Slash command menu */}
       {slash && filtered.length > 0 && (

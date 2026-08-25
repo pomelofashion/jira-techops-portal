@@ -13791,6 +13791,11 @@ const WIDE_SECTIONS = new Set([
   'reports',
 ]);
 
+// Sections that use the FULL remaining width (edge to edge, like a workspace).
+// The board needs it for its 11 columns; the doc builder + library use it so
+// the editor, preview, and admin tables can breathe on large displays.
+const FULL_SECTIONS = new Set(['board', 'studio', 'docs']);
+
 // Every navigable section id — used to validate URL hashes so a stale or
 // mistyped hash can never render a broken page.
 const VALID_SECTIONS = new Set([
@@ -14857,11 +14862,17 @@ function AppContent() {
               className="pomelo-main"
               style={{
                 ...S.main,
-                // The board uses the full remaining width so all 11 columns
-                // fit without horizontal scrolling.
-                maxWidth:
-                  section === 'board' ? 'none' : WIDE_SECTIONS.has(section) ? '1400px' : '1100px',
-                padding: WIDE_SECTIONS.has(section) ? '24px 20px' : undefined,
+                // FULL_SECTIONS stretch edge to edge (board, doc studio, docs);
+                // WIDE_SECTIONS get 1400px; everything else stays 1100px.
+                maxWidth: FULL_SECTIONS.has(section)
+                  ? 'none'
+                  : WIDE_SECTIONS.has(section)
+                    ? '1400px'
+                    : '1100px',
+                padding:
+                  FULL_SECTIONS.has(section) || WIDE_SECTIONS.has(section)
+                    ? '24px 20px'
+                    : undefined,
               }}
             >
               {renderPage()}

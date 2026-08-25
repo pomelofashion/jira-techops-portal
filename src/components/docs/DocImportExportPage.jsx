@@ -449,7 +449,7 @@ function DocFullPage({ doc, allDocs, onClose, onSelect }) {
   const nextDoc = docIndex < allDocs.length - 1 ? allDocs[docIndex + 1] : null;
 
   return (
-    <div style={{ display: 'flex', margin: '0 -28px', minHeight: '100%' }}>
+    <div style={{ display: 'flex', minHeight: '100%' }}>
       {/* Sidebar */}
       <div
         style={{
@@ -1601,7 +1601,6 @@ export default function DocImportExportPage({
       <div
         style={{
           display: 'flex',
-          margin: '0 -28px',
           minHeight: '100%',
           fontFamily: "'Inter', sans-serif",
         }}

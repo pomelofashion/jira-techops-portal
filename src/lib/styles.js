@@ -134,6 +134,23 @@ export const S = {
     cursor: 'pointer',
     transition: 'all 0.15s',
   },
+  // Compact icon button used by editor toolbars (Doc Studio's RichTextarea).
+  toolbarBtn: {
+    minWidth: '28px',
+    height: '28px',
+    padding: '0 7px',
+    borderRadius: '6px',
+    border: '1px solid transparent',
+    background: 'transparent',
+    color: 'var(--text-secondary)',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: 700,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontFamily: "'Inter', sans-serif",
+  },
   label: {
     fontSize: '12px',
     fontWeight: 700,
