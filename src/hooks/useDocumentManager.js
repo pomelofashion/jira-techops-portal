@@ -173,31 +173,43 @@ export default function useDocumentManager(role = 'user') {
       setUploadProgress(0);
       setUploadSummary(null);
 
+      // One uploadDocs call for the whole batch: extraction runs serially in
+      // the browser, then the docs POST in a few packed requests (not one per
+      // file), which keeps big batches under the production rate limit.
+      const ids = new Set(pending.map(p => p.id));
+      setQueue(prev =>
+        prev.map(q => (ids.has(q.id) ? { ...q, status: 'uploading', progress: 0 } : q))
+      );
+
+      const { data: outcomes, error } = await uploadDocs(pending, p => {
+        setUploadProgress(p);
+        setQueue(prev =>
+          prev.map(q => (ids.has(q.id) && q.status === 'uploading' ? { ...q, progress: p } : q))
+        );
+      });
+
       let succeeded = 0;
       let failed = 0;
-
-      for (let i = 0; i < pending.length; i++) {
-        const item = pending[i];
+      if (error || !Array.isArray(outcomes)) {
+        failed = pending.length;
         setQueue(prev =>
-          prev.map(q => (q.id === item.id ? { ...q, status: 'uploading', progress: 0 } : q))
+          prev.map(q =>
+            ids.has(q.id) ? { ...q, status: 'error', error: error || 'Upload failed' } : q
+          )
         );
-
-        const { error } = await uploadDocs([item], p => {
-          setQueue(prev => prev.map(q => (q.id === item.id ? { ...q, progress: p } : q)));
-          setUploadProgress(Math.round(((i + p / 100) / pending.length) * 100));
-        });
-
-        if (error) {
-          setQueue(prev =>
-            prev.map(q => (q.id === item.id ? { ...q, status: 'error', error } : q))
-          );
-          failed++;
-        } else {
-          setQueue(prev =>
-            prev.map(q => (q.id === item.id ? { ...q, status: 'complete', progress: 100 } : q))
-          );
-          succeeded++;
-        }
+      } else {
+        const outcomeById = new Map(pending.map((p, i) => [p.id, outcomes[i]]));
+        setQueue(prev =>
+          prev.map(q => {
+            if (!ids.has(q.id)) return q;
+            const o = outcomeById.get(q.id);
+            return o?.ok
+              ? { ...q, status: 'complete', progress: 100 }
+              : { ...q, status: 'error', error: o?.error || 'Upload failed' };
+          })
+        );
+        succeeded = outcomes.filter(o => o?.ok).length;
+        failed = pending.length - succeeded;
       }
 
       setUploading(false);

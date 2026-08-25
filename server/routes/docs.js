@@ -30,24 +30,48 @@ const normalizeTags = t => {
   return [];
 };
 
-const serialize = (d, versions) => ({
-  id: d.id,
-  title: d.title,
-  content: d.content,
-  category: d.category,
-  visibility: d.visibility,
-  tags: d.tags || [],
-  icon: d.icon,
-  description: d.description,
-  author: d.author,
-  status: d.status,
-  featured: d.featured,
-  review: d.review,
-  version: d.version,
-  createdAt: d.created_at,
-  updatedAt: d.updated_at,
-  ...(versions ? { versions } : {}),
-});
+// Rows are read through this projection so serialize() can expose the uploaded
+// source file (LEFT JOIN — docs authored in the Studio simply have no file row).
+const DOC_SELECT = `SELECT d.*, f.filename AS file_name, f.mime_type AS file_mime, f.size AS file_bytes
+                    FROM docs d LEFT JOIN doc_files f ON f.doc_id = d.id`;
+
+const serialize = (d, versions) => {
+  // Served by GET /api/docs/:id/file. Named dataUrl because the client shape is
+  // shared with mock mode, where the original is inlined as a data: URL.
+  const fileUrl = d.file_name ? `/api/docs/${d.id}/file` : null;
+  const isImage = fileUrl && String(d.file_mime || '').startsWith('image/');
+  return {
+    id: d.id,
+    title: d.title,
+    content: d.content,
+    category: d.category,
+    visibility: d.visibility,
+    tags: d.tags || [],
+    icon: d.icon,
+    description: d.description,
+    author: d.author,
+    status: d.status,
+    featured: d.featured,
+    review: d.review,
+    version: d.version,
+    format: d.format || undefined,
+    fileSize: d.file_size == null ? undefined : Number(d.file_size),
+    createdAt: d.created_at,
+    updatedAt: d.updated_at,
+    ...(fileUrl
+      ? {
+          sourceFile: {
+            name: d.file_name,
+            type: d.file_mime,
+            size: Number(d.file_bytes),
+            dataUrl: fileUrl,
+          },
+        }
+      : {}),
+    ...(isImage ? { imageUrl: fileUrl } : {}),
+    ...(versions ? { versions } : {}),
+  };
+};
 const serializeVersion = v => ({
   versionId: v.version_id,
   savedAt: v.saved_at,
@@ -80,7 +104,7 @@ router.get('/', async (req, res, next) => {
     const countRes = await query(`SELECT count(*)::int AS total FROM docs ${clause}`, params);
     params.push(limit, (page - 1) * limit);
     const { rows } = await query(
-      `SELECT * FROM docs ${clause} ORDER BY updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      `${DOC_SELECT} ${clause} ORDER BY d.updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
     const total = countRes.rows[0].total;
@@ -107,37 +131,14 @@ router.post('/bulk-export', requireCapability('docs.manage'), async (req, res, n
   try {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
     if (!ids.length) return res.json({ docs: [] });
-    const { rows } = await query('SELECT * FROM docs WHERE id = ANY($1::uuid[])', [ids]);
+    const { rows } = await query(`${DOC_SELECT} WHERE d.id = ANY($1::uuid[])`, [ids]);
     res.json({ docs: rows.map(d => serialize(d)) });
   } catch (err) {
     next(err);
   }
 });
 
-// File upload (S3 + AI extraction) lands in the Day 5 attachments work.
-router.post('/upload', requireCapability('docs.manage'), (_req, res) => {
-  res.status(501).json({ error: 'Upload is handled via the S3 presign flow (coming in Day 5).' });
-});
-
-// Restricted docs are readable only by staff; used by every route that
-// returns doc content (including version snapshots).
-const canReadDoc = (user, doc) => doc.visibility !== 'IT Team Only' || can(user, 'docs.manage');
-
-// ─── Read one ─────────────────────────────────────────────────────────────────
-router.get('/:id', async (req, res, next) => {
-  try {
-    const { rows } = await query('SELECT * FROM docs WHERE id=$1', [req.params.id]);
-    const d = rows[0];
-    if (!d) return res.status(404).json({ error: 'Document not found.' });
-    if (!canReadDoc(req.user, d))
-      return res.status(403).json({ error: 'Insufficient permissions.' });
-    res.json(serialize(d));
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ─── Create ───────────────────────────────────────────────────────────────────
+// Shared by create (POST /) and upload (POST /upload).
 const writeSchema = z
   .object({
     title: z.string().min(1).max(300),
@@ -151,6 +152,173 @@ const writeSchema = z
   })
   .strict();
 
+// ─── Upload ───────────────────────────────────────────────────────────────────
+// The client extracts markdown from the file (pdfjs / mammoth / Claude vision)
+// and posts the result together with the original bytes as a data: URL. The
+// server persists the doc row + the original file, and never parses the binary
+// itself — extraction stays in one place instead of being duplicated per format.
+// 3 MB: Vercel serverless hard-caps request bodies at 4.5 MB, and base64
+// inflates ~1.37× — a 3 MB file arrives as ~4.1 MB of JSON, just under the
+// platform limit. Must mirror API_SOURCE_FILE_LIMIT in src/api/docsApi.js.
+const MAX_FILE_BYTES = 3 * 1024 * 1024;
+
+const sourceFileSchema = z
+  .object({
+    name: z.string().min(1).max(500),
+    type: z.string().max(200).optional(),
+    size: z.number().int().nonnegative().optional(),
+    capturedAt: z.string().optional(),
+    // "data:<mime>;base64,<payload>" — null when the client skipped capture.
+    dataUrl: z.string().nullable().optional(),
+  })
+  .strict();
+
+const uploadSchema = z
+  .object({
+    docs: z
+      .array(
+        writeSchema.extend({
+          format: z.string().max(16).optional(),
+          fileSize: z.number().int().nonnegative().optional(),
+          sourceFile: sourceFileSchema.nullable().optional(),
+        })
+      )
+      .min(1)
+      .max(20),
+  })
+  .strict();
+
+// data:<mime>;base64,<payload> → { mime, buffer }. Returns null for anything
+// that isn't a base64 data URL (the client sends null past its size cap).
+const decodeDataUrl = dataUrl => {
+  if (typeof dataUrl !== 'string') return null;
+  const m = /^data:([^;,]*);base64,(.*)$/s.exec(dataUrl);
+  if (!m) return null;
+  const buffer = Buffer.from(m[2], 'base64');
+  if (!buffer.length) return null;
+  return { mime: m[1] || 'application/octet-stream', buffer };
+};
+
+router.post('/upload', requireCapability('docs.manage'), async (req, res, next) => {
+  try {
+    const parsed = uploadSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+
+    // Per-doc outcomes: one bad file must not sink the rest of the batch.
+    // Each doc gets its own transaction; the response reports every result
+    // in input order so the client can map statuses back to its queue.
+    const results = [];
+    for (const d of parsed.data.docs) {
+      try {
+        const file = d.sourceFile ? decodeDataUrl(d.sourceFile.dataUrl) : null;
+        if (file && file.buffer.length > MAX_FILE_BYTES) {
+          results.push({
+            ok: false,
+            title: d.title,
+            error: `"${d.sourceFile.name}" exceeds the ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB upload limit.`,
+          });
+          continue;
+        }
+
+        const row = await withTransaction(async client => {
+          const { rows } = await client.query(
+            `INSERT INTO docs (title, content, category, visibility, description, icon, tags, author, format, file_size, status, version)
+             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,'Active',1) RETURNING *`,
+            [
+              d.title,
+              d.content || '',
+              d.category || 'Other',
+              d.visibility || 'Public',
+              d.description || null,
+              d.icon || '📄',
+              JSON.stringify(normalizeTags(d.tags)),
+              d.author || req.user.name,
+              d.format || null,
+              d.fileSize ?? d.sourceFile?.size ?? null,
+            ]
+          );
+          const doc = rows[0];
+          if (file) {
+            await client.query(
+              `INSERT INTO doc_files (doc_id, filename, mime_type, size, bytes) VALUES ($1,$2,$3,$4,$5)`,
+              [
+                doc.id,
+                d.sourceFile.name,
+                d.sourceFile.type || file.mime,
+                file.buffer.length,
+                file.buffer,
+              ]
+            );
+            doc.file_name = d.sourceFile.name;
+            doc.file_mime = d.sourceFile.type || file.mime;
+            doc.file_bytes = file.buffer.length;
+          }
+          return doc;
+        });
+
+        await writeAudit(req.user.email, 'doc.upload', row.id, {
+          title: d.title,
+          file: d.sourceFile?.name || null,
+        });
+        results.push({ ok: true, doc: serialize(row) });
+      } catch {
+        results.push({ ok: false, title: d.title, error: 'Upload failed for this document.' });
+      }
+    }
+    res.json({ results });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Restricted docs are readable only by staff; used by every route that
+// returns doc content (including version snapshots).
+const canReadDoc = (user, doc) => doc.visibility !== 'IT Team Only' || can(user, 'docs.manage');
+
+// ─── Read one ─────────────────────────────────────────────────────────────────
+router.get('/:id', async (req, res, next) => {
+  try {
+    const { rows } = await query(`${DOC_SELECT} WHERE d.id=$1`, [req.params.id]);
+    const d = rows[0];
+    if (!d) return res.status(404).json({ error: 'Document not found.' });
+    if (!canReadDoc(req.user, d))
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    res.json(serialize(d));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Original uploaded file ───────────────────────────────────────────────────
+// Opened in a new tab from the doc page, so it authenticates off the session
+// cookie like every other route and re-checks the parent doc's visibility.
+router.get('/:id/file', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT d.visibility, f.filename, f.mime_type, f.size, f.bytes
+         FROM docs d JOIN doc_files f ON f.doc_id = d.id
+        WHERE d.id=$1`,
+      [req.params.id]
+    );
+    const f = rows[0];
+    if (!f) return res.status(404).json({ error: 'File not found.' });
+    if (!canReadDoc(req.user, f))
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    res.setHeader('Content-Type', f.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Length', f.size);
+    // inline: PDFs/images preview in-tab; browsers download the rest anyway.
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename*=UTF-8''${encodeURIComponent(f.filename)}`
+    );
+    res.send(f.bytes);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Create ───────────────────────────────────────────────────────────────────
 router.post('/', requireCapability('docs.manage'), async (req, res, next) => {
   try {
     const parsed = writeSchema.safeParse(req.body);
@@ -226,10 +394,9 @@ router.put('/:id', requireCapability('docs.manage'), async (req, res, next) => {
       sets.push(`review = $${params.length}::jsonb`);
     }
     params.push(req.params.id);
-    const { rows } = await query(
-      `UPDATE docs SET ${sets.join(', ')} WHERE id=$${params.length} RETURNING *`,
-      params
-    );
+    await query(`UPDATE docs SET ${sets.join(', ')} WHERE id=$${params.length}`, params);
+    // Re-read through DOC_SELECT so the response keeps the source-file fields.
+    const { rows } = await query(`${DOC_SELECT} WHERE d.id=$1`, [req.params.id]);
     await writeAudit(req.user.email, 'doc.update', req.params.id);
     res.json(serialize(rows[0]));
   } catch (err) {

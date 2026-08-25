@@ -6,23 +6,9 @@ import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { DOC_CATEGORIES } from '../../mocks/docsMockData.js';
 
-const ACCEPT_TYPES = {
-  'application/pdf': ['.pdf'],
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-  'application/msword': ['.doc'],
-  'text/markdown': ['.md'],
-  'text/plain': ['.txt'],
-  'text/csv': ['.csv'],
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-  'application/vnd.ms-excel': ['.xls'],
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
-  'application/vnd.ms-powerpoint': ['.ppt'],
-  'image/png': ['.png'],
-  'image/jpeg': ['.jpg', '.jpeg'],
-  'image/gif': ['.gif'],
-  'image/webp': ['.webp'],
-};
-
+// Every file type is accepted. Formats with a converter (PDF, DOCX, MD, TXT,
+// CSV, images) become readable pages; anything else is stored as-is and served
+// back through a download card on the doc page.
 const FILE_TYPE_ICONS = [
   { ext: 'PDF', icon: '📄', label: '.pdf' },
   { ext: 'DOCX', icon: '📝', label: '.docx/.doc' },
@@ -32,6 +18,7 @@ const FILE_TYPE_ICONS = [
   { ext: 'XLSX', icon: '📈', label: '.xlsx' },
   { ext: 'PPTX', icon: '📑', label: '.pptx' },
   { ext: 'IMG', icon: '🖼️', label: '.png/.jpg/.gif/.webp' },
+  { ext: 'ANY', icon: '📦', label: '+ any other format' },
 ];
 
 const STATUS_CONFIG = {
@@ -58,7 +45,13 @@ const getExt = filename => filename.split('.').pop().toUpperCase();
 const friendlyError = err => {
   if (!err) return '';
   const msg = String(err).toLowerCase();
-  if (msg.includes('too large') || msg.includes('size')) return 'File too large';
+  if (
+    msg.includes('too large') ||
+    msg.includes('size') ||
+    msg.includes('exceeds') ||
+    msg.includes('limit')
+  )
+    return 'File too large';
   if (msg.includes('format') || msg.includes('type') || msg.includes('unsupported'))
     return 'Format not supported';
   if (msg.includes('network') || msg.includes('fetch') || msg.includes('connect'))
@@ -311,7 +304,6 @@ export default function DocUploader({
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: ACCEPT_TYPES,
     multiple: true,
   });
 
@@ -364,7 +356,8 @@ export default function DocUploader({
             {isDragActive ? 'Drop files here' : 'Drag & drop files, or click to browse'}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Supports: PDF, DOCX, MD, TXT, CSV, XLSX, PPTX, PNG, JPG, GIF, WEBP
+            Any file type · up to 3 MB per file. PDF, DOCX, MD, TXT, CSV and images become readable
+            pages; everything else is stored with a download card.
           </div>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>

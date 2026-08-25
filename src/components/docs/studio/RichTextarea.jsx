@@ -563,7 +563,10 @@ export default function RichTextarea({
     if (!ta) return;
     if (ta.selectionEnd > ta.selectionStart && document.activeElement === ta) {
       const c = caretCoords(ta, ta.selectionStart);
-      setBubble({ top: Math.max(c.top - 46, 2), left: Math.min(c.left, 420) });
+      // Prefer floating above the selection; flip below when that would sit on
+      // top of the static toolbar (which would swallow its clicks).
+      const above = c.top - 46;
+      setBubble({ top: above >= 44 ? above : c.top + 26, left: Math.min(c.left, 420) });
     } else if (bubble) {
       setBubble(null);
     }

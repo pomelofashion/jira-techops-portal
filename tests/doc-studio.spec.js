@@ -5,18 +5,29 @@
 // contents. Runs non-headless per the QA charter (see playwright.config.js).
 
 import { test, expect } from '@playwright/test';
+import { config as dotenvConfig } from 'dotenv';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+dotenvConfig({ path: resolve(dirname(fileURLToPath(import.meta.url)), '..', '.env.local') });
 
 const BASE = 'http://localhost:5173';
-const ADMIN = { email: 'alex.lee@pomelo.com', password: 'Admin123!' };
-const USER = { email: 'kai.nguyen@pomelo.com', password: 'User123!' };
+// DB-backed auth (API mode is always on): the old mock seed users are gone.
+// Admin creds come from E2E_ADMIN_* (falling back to the seeded superadmin);
+// the RBAC check needs a non-admin account via E2E_USER_*.
+const ADMIN = {
+  email: process.env.E2E_ADMIN_EMAIL || process.env.SEED_SUPERADMIN_EMAIL,
+  password: process.env.E2E_ADMIN_PASSWORD || process.env.SEED_SUPERADMIN_PASSWORD,
+};
+const USER = { email: process.env.E2E_USER_EMAIL, password: process.env.E2E_USER_PASSWORD };
 
 async function freshLogin(page, { email, password }) {
   await page.goto(BASE + '/');
   await page.evaluate(() => {
     sessionStorage.clear();
     Object.keys(localStorage)
-      .filter((k) => k.startsWith('pomelo:'))
-      .forEach((k) => localStorage.removeItem(k));
+      .filter(k => k.startsWith('pomelo:'))
+      .forEach(k => localStorage.removeItem(k));
   });
   await page.reload();
   await page.waitForLoadState('networkidle');
@@ -32,9 +43,11 @@ async function openStudio(page) {
   await expect(page.locator('text=📚 Doc Studio')).toBeVisible();
 }
 
-const editor = (page) => page.locator('textarea[placeholder^="# Heading"]');
+const editor = page => page.locator('textarea[placeholder^="# Heading"]');
 
 test.describe('Documentation Studio', () => {
+  test.skip(!ADMIN.email || !ADMIN.password, 'Admin credentials not configured');
+
   test('admin can open the Studio from Admin tools', async ({ page }) => {
     await freshLogin(page, ADMIN);
     await openStudio(page);
@@ -89,7 +102,9 @@ test.describe('Documentation Studio', () => {
     await ta.press('Escape');
   });
 
-  test('save persists the page to the list, then versions + diff appear on edit', async ({ page }) => {
+  test('save persists the page to the list, then versions + diff appear on edit', async ({
+    page,
+  }) => {
     await freshLogin(page, ADMIN);
     await openStudio(page);
 
@@ -100,7 +115,9 @@ test.describe('Documentation Studio', () => {
     await page.click('button:has-text("Save")');
 
     // Appears in the sidebar list
-    await expect(page.locator('aside button:has-text("QA Signoff HowTo")')).toBeVisible({ timeout: 8000 });
+    await expect(page.locator('aside button:has-text("QA Signoff HowTo")')).toBeVisible({
+      timeout: 8000,
+    });
 
     // Edit + save again → version history records the prior state
     const ta = editor(page);
@@ -127,11 +144,37 @@ test.describe('Documentation Studio', () => {
     await ta.click();
     await ta.fill('# Alpha Section\n\ntext\n\n## Beta Section\n\nmore');
     // Outline tab is default; headings should appear in the right panel
-    await expect(page.locator('nav[aria-label="Page outline"] button:has-text("Alpha Section")')).toBeVisible();
-    await expect(page.locator('nav[aria-label="Page outline"] button:has-text("Beta Section")')).toBeVisible();
+    await expect(
+      page.locator('nav[aria-label="Page outline"] button:has-text("Alpha Section")')
+    ).toBeVisible();
+    await expect(
+      page.locator('nav[aria-label="Page outline"] button:has-text("Beta Section")')
+    ).toBeVisible();
+  });
+
+  test('smart list continuation and word-count footer', async ({ page }) => {
+    await freshLogin(page, ADMIN);
+    await openStudio(page);
+    await page.click('button:has-text("+ New Page")');
+    await page.click('button:has-text("Blank Page")');
+
+    const ta = editor(page);
+    await ta.click();
+    await ta.pressSequentially('- first item');
+    await ta.press('Enter');
+    await ta.pressSequentially('second item');
+    // Enter inside a bullet list auto-continues the "- " prefix.
+    await expect(ta).toHaveValue('- first item\n- second item');
+    // Enter on an empty item exits the list (prefix removed).
+    await ta.press('Enter');
+    await ta.press('Enter');
+    await expect(ta).toHaveValue('- first item\n- second item\n');
+    // Word count + reading time footer under the editor.
+    await expect(page.locator('text=/\\d+ words · \\d+ min read/')).toBeVisible();
   });
 
   test('non-admin cannot access the Studio (RBAC)', async ({ page }) => {
+    test.skip(!USER.email || !USER.password, 'Non-admin credentials not configured');
     await freshLogin(page, USER);
     // Regular users do not see the Admin tools dropdown at all.
     await expect(page.locator('button[aria-label="Admin tools"]')).toHaveCount(0);

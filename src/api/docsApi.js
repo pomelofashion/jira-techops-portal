@@ -4,7 +4,7 @@
 
 import { MOCK_DOCS } from '../mocks/docsMockData.js';
 import { extractDocumentContent } from './claudeApi.js';
-import { api, USE_MOCK, wrap, simulateDelay } from './client.js';
+import { api, USE_MOCK, wrap, simulateDelay, errorMessage } from './client.js';
 
 // ─── In-memory mock store (mutated on upload/update/delete) ───────────────────
 let mockStore = [...MOCK_DOCS];
@@ -26,6 +26,18 @@ const FORMAT_ICONS = {
   JPEG: '🖼️',
   GIF: '🖼️',
   WEBP: '🖼️',
+  ZIP: '🗜️',
+  RAR: '🗜️',
+  '7Z': '🗜️',
+  MP4: '🎬',
+  MOV: '🎬',
+  WEBM: '🎬',
+  MP3: '🎵',
+  WAV: '🎵',
+  JSON: '🧾',
+  YAML: '🧾',
+  YML: '🧾',
+  LOG: '📃',
 };
 
 const fmtBytes = bytes => {
@@ -112,9 +124,21 @@ export const getDoc = async id => {
 // @param {FormData} formData — contains files[] + metadata
 // @param {(progress: number) => void} onProgress
 // ─────────────────────────────────────────────────────────────────────────────
+// Mock mode keeps the original inline in memory, so it stays cheap (1 MB).
+// API mode persists the bytes server-side and matches the route's own cap:
+// 3 MB, because Vercel hard-caps request bodies at 4.5 MB and base64 inflates
+// ~1.37×. Must mirror MAX_FILE_BYTES in server/routes/docs.js.
 const SOURCE_FILE_LIMIT = 1_048_576; // 1 MB — files larger keep metadata only
+const API_SOURCE_FILE_LIMIT = 3 * 1024 * 1024;
+export const UPLOAD_FILE_LIMIT = API_SOURCE_FILE_LIMIT; // for UI copy/validation
 
-const fileToSource = file =>
+// Chunk packing for batch uploads: keep each request comfortably under the
+// Vercel body cap and the doc route's max(20), and keep request COUNT low so a
+// big batch doesn't trip the 30 req/min production rate limiter.
+const CHUNK_MAX_DOCS = 4;
+const CHUNK_MAX_CHARS = 4_000_000; // total base64 chars per request
+
+const fileToSource = (file, limit) =>
   new Promise(resolve => {
     const meta = {
       name: file.name,
@@ -122,7 +146,7 @@ const fileToSource = file =>
       size: file.size,
       capturedAt: new Date().toISOString(),
     };
-    if (file.size > SOURCE_FILE_LIMIT) {
+    if (file.size > limit) {
       resolve({ ...meta, dataUrl: null });
       return;
     }
@@ -132,137 +156,219 @@ const fileToSource = file =>
     reader.readAsDataURL(file);
   });
 
+const IMAGE_EXTS = new Set(['PNG', 'JPG', 'JPEG', 'GIF', 'WEBP']);
+
+// Turns a queued file into the doc fields both modes need. Extraction (pdfjs /
+// mammoth / Claude) runs in the browser for both — the backend stores the
+// resulting markdown and never parses the binary itself.
+const buildDocFromFile = async item => {
+  const format = item.file.name.split('.').pop().toUpperCase();
+  const title = item.title || item.file.name.replace(/\.[^.]+$/, '');
+  const isImageFormat = IMAGE_EXTS.has(format);
+
+  let extractionError = null;
+  let content = await extractDocumentContent(item.file).catch(err => {
+    extractionError = err;
+    // KEY_MISSING may carry pdfjs-extracted text as a fallback
+    return err.fallbackContent || null;
+  });
+
+  if (!content) {
+    if (isImageFormat) {
+      // Image docs: content is the AI caption. Show a neutral placeholder if unavailable.
+      content = item.description || 'No description available.';
+    } else {
+      // Fallback: read raw text for text-based formats
+      const rawText = await readFileAsText(item.file);
+      if (rawText) {
+        content = rawText;
+      } else {
+        // Could not extract content — show placeholder with actionable hint
+        const uploadedDate = new Date().toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        });
+        let claudeNote;
+        if (extractionError?.code === 'KEY_MISSING') {
+          claudeNote = `\n> 💡 **AI formatting unavailable.** Add \`ANTHROPIC_API_KEY=sk-ant-...\` to \`.env.local\` for better extraction. Raw text shown above.`;
+        } else if (extractionError?.code === 'BFF_DOWN') {
+          claudeNote = `\n> 💡 **BFF proxy is not running.** Start both servers with \`npm run dev:all\` for AI-enhanced extraction.`;
+        } else {
+          claudeNote = `\n> ⚠️ Content extraction was attempted but did not succeed for this file. Download to view the original.`;
+        }
+        content =
+          `# ${title}\n\n` +
+          claudeNote +
+          '\n\n' +
+          `## File Details\n\n` +
+          `- **File name:** ${item.file.name}\n` +
+          `- **File size:** ${fmtBytes(item.file.size)}\n` +
+          `- **Format:** ${format}\n` +
+          `- **Category:** ${item.category || 'Other'}\n` +
+          `- **Uploaded:** ${uploadedDate}\n` +
+          (item.description ? `\n## Description\n\n${item.description}\n` : '');
+      }
+    }
+  }
+
+  // Auto-generate description from content when the user left it blank.
+  // Strip Markdown syntax, skip headers/images/code fences, take the
+  // first meaningful sentence(s) up to 200 characters.
+  const description = (() => {
+    if (item.description) return item.description;
+    if (!content) return '';
+    const lines = content.split('\n');
+    for (const line of lines) {
+      const stripped = line
+        .replace(/^#{1,6}\s+/, '') // headings
+        .replace(/^[-*>]\s+/, '') // list items / blockquotes
+        .replace(/^\d+\.\s+/, '') // numbered lists
+        .replace(/!\[[^\]]*\]\([^)]*\)/, '') // images
+        .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
+        .replace(/`[^`]+`/g, '') // inline code
+        .trim();
+      if (stripped.length > 30) {
+        return stripped.length > 200 ? stripped.slice(0, 197) + '…' : stripped;
+      }
+    }
+    return '';
+  })();
+
+  return {
+    title,
+    description,
+    content,
+    format,
+    isImageFormat,
+    category: item.category || 'Other',
+    icon: FORMAT_ICONS[format] || '📄',
+    fileSize: item.file.size,
+    visibility: item.visibility || 'Public',
+    tags: item.tags
+      ? item.tags
+          .split(',')
+          .map(t => t.trim())
+          .filter(Boolean)
+      : [],
+  };
+};
+
+// Uploads a batch of queued files. Returns per-item outcomes IN INPUT ORDER:
+//   [{ ok: true, doc } | { ok: false, error }]
+// Extraction runs serially in the browser; the docs are then POSTed in packed
+// chunks (few requests, each under the Vercel 4.5 MB body cap) instead of one
+// request per file, so large batches don't trip the production rate limiter.
 export const uploadDocs = async (fileMetaList, onProgress) => {
   return wrap(async () => {
+    const total = fileMetaList.length;
+    const outcomes = new Array(total);
+    // Progress model: extraction is the first half, network the second.
+    let extracted = 0;
+    const reportExtract = () => onProgress?.(Math.round((extracted / Math.max(1, total)) * 50));
+
     if (USE_MOCK) {
-      const IMAGE_EXTS = new Set(['PNG', 'JPG', 'JPEG', 'GIF', 'WEBP']);
-      const results = [];
-      for (let i = 0; i < fileMetaList.length; i++) {
+      for (let i = 0; i < total; i++) {
         const item = fileMetaList[i];
-        const format = item.file.name.split('.').pop().toUpperCase();
-        const title = item.title || item.file.name.replace(/\.[^.]+$/, '');
-        const isImageFormat = IMAGE_EXTS.has(format);
-
-        // For image files, create a blob URL for reliable in-memory display.
-        // This avoids embedding multi-megabyte base64 data in the content field.
+        const built = await buildDocFromFile(item);
+        const { isImageFormat, ...fields } = built;
+        // Blob URL for reliable in-memory display of image docs — avoids
+        // embedding multi-megabyte base64 data in the content field.
         const imageUrl = isImageFormat ? URL.createObjectURL(item.file) : null;
-
-        // Capture the original file (as a data URL, capped at 1 MB) so the doc
-        // page can offer a download/preview of the source — not just the
-        // AI-extracted markdown.
-        const sourceFile = await fileToSource(item.file);
-
-        // Read text content for plain-text formats; show rich placeholder for binary formats
-        // Try Claude-powered content extraction first
-        let extractionError = null;
-        let content = await extractDocumentContent(item.file).catch(err => {
-          extractionError = err;
-          // KEY_MISSING may carry pdfjs-extracted text as a fallback
-          return err.fallbackContent || null;
-        });
-
-        if (!content) {
-          if (isImageFormat) {
-            // Image docs: content is the AI caption. Show a neutral placeholder if unavailable.
-            content = item.description || 'No description available.';
-          } else {
-            // Fallback: read raw text for text-based formats
-            const rawText = await readFileAsText(item.file);
-            if (rawText) {
-              content = rawText;
-            } else {
-              // Could not extract content — show placeholder with actionable hint
-              const uploadedDate = new Date().toLocaleDateString('en-GB', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric',
-              });
-              let claudeNote;
-              if (extractionError?.code === 'KEY_MISSING') {
-                claudeNote = `\n> 💡 **AI formatting unavailable.** Add \`ANTHROPIC_API_KEY=sk-ant-...\` to \`.env.local\` for better extraction. Raw text shown above.`;
-              } else if (extractionError?.code === 'BFF_DOWN') {
-                claudeNote = `\n> 💡 **BFF proxy is not running.** Start both servers with \`npm run dev:all\` for AI-enhanced extraction.`;
-              } else {
-                claudeNote = `\n> ⚠️ Content extraction was attempted but did not succeed for this file. Download to view the original.`;
-              }
-              content =
-                `# ${title}\n\n` +
-                claudeNote +
-                '\n\n' +
-                `## File Details\n\n` +
-                `- **File name:** ${item.file.name}\n` +
-                `- **File size:** ${fmtBytes(item.file.size)}\n` +
-                `- **Format:** ${format}\n` +
-                `- **Category:** ${item.category || 'Other'}\n` +
-                `- **Uploaded:** ${uploadedDate}\n` +
-                (item.description ? `\n## Description\n\n${item.description}\n` : '');
-            }
-          }
-        }
-
-        // Auto-generate description from content when the user left it blank.
-        // Strip Markdown syntax, skip headers/images/code fences, take the
-        // first meaningful sentence(s) up to 200 characters.
-        const autoDescription = (() => {
-          if (item.description) return item.description;
-          if (!content) return '';
-          const lines = content.split('\n');
-          for (const line of lines) {
-            const stripped = line
-              .replace(/^#{1,6}\s+/, '') // headings
-              .replace(/^[-*>]\s+/, '') // list items / blockquotes
-              .replace(/^\d+\.\s+/, '') // numbered lists
-              .replace(/!\[[^\]]*\]\([^)]*\)/, '') // images
-              .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
-              .replace(/`[^`]+`/g, '') // inline code
-              .trim();
-            if (stripped.length > 30) {
-              return stripped.length > 200 ? stripped.slice(0, 197) + '…' : stripped;
-            }
-          }
-          return '';
-        })();
-
+        const sourceFile = await fileToSource(item.file, SOURCE_FILE_LIMIT);
         await simulateDelay(300);
         const newDoc = {
+          ...fields,
           id: 'doc-' + Date.now() + '-' + i,
-          title,
-          description: autoDescription,
-          category: item.category || 'Other',
-          format,
-          icon: FORMAT_ICONS[format] || '📄',
-          fileSize: item.file.size,
           viewCount: 0,
           version: item.version || '1.0',
           author: item.author || 'Unknown',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          tags: item.tags
-            ? item.tags
-                .split(',')
-                .map(t => t.trim())
-                .filter(Boolean)
-            : [],
-          visibility: item.visibility || 'Public',
           status: 'Active',
-          content,
           imageUrl,
           sourceFile,
         };
         mockStore.unshift(newDoc);
-        results.push(newDoc);
-        onProgress?.(Math.round(((i + 1) / fileMetaList.length) * 100));
+        outcomes[i] = { ok: true, doc: newDoc };
+        onProgress?.(Math.round(((i + 1) / total) * 100));
       }
-      return results;
+      return outcomes;
     }
-    const fd = new FormData();
-    fileMetaList.forEach(item => fd.append('files', item.file));
-    fd.append('meta', JSON.stringify(fileMetaList.map(({ file: _, ...m }) => m)));
-    const { data } = await api.post('/api/docs/upload', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: e => onProgress?.(Math.round((e.loaded / e.total) * 100)),
-    });
-    return data;
+
+    // 1) Pre-flight + extraction. Oversize files fail fast without extraction.
+    const sendable = [];
+    for (let i = 0; i < total; i++) {
+      const item = fileMetaList[i];
+      if (item.file.size > API_SOURCE_FILE_LIMIT) {
+        outcomes[i] = {
+          ok: false,
+          error: `Exceeds the ${Math.round(API_SOURCE_FILE_LIMIT / 1048576)} MB upload limit.`,
+        };
+        extracted++;
+        reportExtract();
+        continue;
+      }
+      const built = await buildDocFromFile(item);
+      const { isImageFormat: _unused, ...fields } = built;
+      const sourceFile = await fileToSource(item.file, API_SOURCE_FILE_LIMIT);
+      sendable.push({
+        index: i,
+        payload: { ...fields, ...(item.author ? { author: item.author } : {}), sourceFile },
+      });
+      extracted++;
+      reportExtract();
+    }
+
+    // 2) Greedy-pack into chunks by base64 weight, then POST chunk by chunk.
+    const chunks = [];
+    let current = [];
+    let currentChars = 0;
+    for (const s of sendable) {
+      const chars = s.payload.sourceFile?.dataUrl?.length || 0;
+      if (
+        current.length &&
+        (current.length >= CHUNK_MAX_DOCS || currentChars + chars > CHUNK_MAX_CHARS)
+      ) {
+        chunks.push(current);
+        current = [];
+        currentChars = 0;
+      }
+      current.push(s);
+      currentChars += chars;
+    }
+    if (current.length) chunks.push(current);
+
+    let uploadedDocs = 0;
+    for (const chunk of chunks) {
+      try {
+        const { data } = await api.post(
+          '/api/docs/upload',
+          { docs: chunk.map(c => c.payload) },
+          { timeout: 60000 } // big base64 bodies outlive the 15s default
+        );
+        const results = Array.isArray(data?.results) ? data.results : [];
+        chunk.forEach((c, j) => {
+          const r = results[j];
+          outcomes[c.index] = r?.ok
+            ? { ok: true, doc: r.doc }
+            : { ok: false, error: r?.error || 'Upload failed.' };
+        });
+      } catch (err) {
+        const status = err?.response?.status;
+        const msg =
+          status === 429
+            ? 'Rate limited — wait a minute and retry the failed files.'
+            : errorMessage(err);
+        chunk.forEach(c => {
+          outcomes[c.index] = { ok: false, error: msg };
+        });
+      }
+      uploadedDocs += chunk.length;
+      onProgress?.(50 + Math.round((uploadedDocs / Math.max(1, sendable.length)) * 50));
+    }
+    onProgress?.(100);
+    return outcomes;
   });
 };
 
