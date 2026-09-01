@@ -17,6 +17,7 @@ const serialize = u => ({
   name: u.name,
   email: u.email,
   department: u.department,
+  avatarUrl: u.avatar_url || null,
   roleId: u.role_id,
   active: u.active,
   emailVerified: u.email_verified,
@@ -73,6 +74,36 @@ router.post('/', requireCapability('users.create'), async (req, res, next) => {
 
 // Edit profile fields, role, and active flag. Role changes need roles.assign;
 // deactivation needs users.delete; profile edits need users.edit.
+// Self-service profile picture. Any authenticated user may set or clear
+// their OWN avatar - no capability needed. Data-URL only (jpeg/png/webp),
+// capped well below the body limit; the client re-encodes to ~256px first.
+router.put('/me/avatar', async (req, res, next) => {
+  try {
+    const schema = z
+      .object({
+        avatarUrl: z
+          .string()
+          .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/)
+          .max(300_000)
+          .nullable(),
+      })
+      .strict();
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
+    const { rows } = await query('UPDATE users SET avatar_url=$1 WHERE id=$2 RETURNING *', [
+      parsed.data.avatarUrl,
+      req.user.id,
+    ]);
+    if (!rows.length) return res.status(404).json({ error: 'User not found.' });
+    await writeAudit(req.user.email, 'user.avatar', req.user.email, {
+      cleared: parsed.data.avatarUrl === null,
+    });
+    res.json(serialize(rows[0]));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.patch('/:id', async (req, res, next) => {
   try {
     const schema = z

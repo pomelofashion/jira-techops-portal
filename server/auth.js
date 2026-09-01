@@ -55,7 +55,7 @@ export function clearAuthCookie(res) {
 // the user is missing or deactivated.
 export async function loadUserWithRole(userId) {
   const { rows } = await query(
-    `SELECT u.id, u.name, u.email, u.role_id, u.department, u.active, u.email_verified,
+    `SELECT u.id, u.name, u.email, u.role_id, u.department, u.active, u.email_verified, u.avatar_url,
             r.id AS role_id, r.name AS role_name, r.label AS role_label,
             r.color AS role_color, r.capabilities AS role_capabilities
        FROM users u JOIN roles r ON r.id = u.role_id
@@ -102,6 +102,7 @@ export async function loadUserWithRole(userId) {
     name: u.name,
     email: u.email,
     department: u.department,
+    avatarUrl: u.avatar_url || null,
     emailVerified: u.email_verified,
     roleId: u.role_id,
     role: {
@@ -189,6 +190,7 @@ export function publicUser(user) {
     name: user.name,
     email: user.email,
     department: user.department,
+    avatarUrl: user.avatarUrl || null,
     roleId: user.roleId,
     role: user.role,
     emailVerified: user.emailVerified,

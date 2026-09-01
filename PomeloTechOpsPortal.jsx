@@ -25,6 +25,7 @@ import { createProblemFromTicket } from './src/api/problemsApi.js';
 import { createJiraTicket, isJiraConfigured } from './src/api/jiraApi.js';
 import { listFeaturedDocs, listDocSummaries } from './src/api/docsApi.js';
 import { API_ENABLED } from './src/api/client.js';
+import { compressImageToDataUrl } from './src/lib/imageUtil.js';
 import * as authApi from './src/api/authApi.js';
 import * as ticketsApi from './src/api/ticketsApi.js';
 import * as usersApi from './src/api/usersApi.js';
@@ -2061,6 +2062,7 @@ const userFromApi = u => ({
   role: findRole(u.roleId)?.name || 'user', // legacy string some components read
   roleId: u.roleId,
   department: u.department,
+  avatarUrl: u.avatarUrl || null,
   active: u.active,
   lastLoginAt: u.lastLoginAt,
   forceReOtp: false,
@@ -7445,6 +7447,44 @@ function ProfileModal({ currentUser, setCurrentUser, onClose, onLogout }) {
   const { can, currentRole } = useRbacCtx();
   const canEditOwnProfile = can('users.edit');
   const [form, setForm, clearDraft] = usePersistentState('profile-edit', { ...currentUser });
+  const avatarInputRef = useRef(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+
+  // Set/clear the avatar immediately (independent of the Save button) so the
+  // picture persists server-side even for users who cannot edit other fields.
+  const applyAvatar = async dataUrl => {
+    setAvatarBusy(true);
+    setAvatarError('');
+    if (API_ENABLED) {
+      const { error } = await usersApi.setMyAvatar(dataUrl);
+      if (error) {
+        setAvatarError(error);
+        setAvatarBusy(false);
+        return;
+      }
+    }
+    setForm(f => ({ ...f, avatarUrl: dataUrl }));
+    setCurrentUser(prev => ({ ...prev, avatarUrl: dataUrl }));
+    setAvatarBusy(false);
+  };
+
+  const handleAvatarPick = async e => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!(file.type || '').startsWith('image/')) {
+      setAvatarError('Please choose an image file.');
+      return;
+    }
+    try {
+      // Canvas re-encode to a small JPEG - keeps rows tiny and strips EXIF.
+      const dataUrl = await compressImageToDataUrl(file, { maxWidth: 256, quality: 0.85 });
+      await applyAvatar(dataUrl);
+    } catch {
+      setAvatarError('Could not read that image - try a different file.');
+    }
+  };
   const initials = form.name
     .split(' ')
     .map(n => n[0])
@@ -7539,25 +7579,108 @@ function ProfileModal({ currentUser, setCurrentUser, onClose, onLogout }) {
             zIndex: 1,
           }}
         >
-          <div
+          <button
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={avatarBusy}
+            aria-label="Change profile picture"
+            title="Change profile picture"
             style={{
-              width: '64px',
-              height: '64px',
+              position: 'relative',
+              padding: 0,
+              border: 'none',
+              background: 'none',
+              cursor: avatarBusy ? 'wait' : 'pointer',
               borderRadius: '50%',
-              background: 'var(--accent-primary)',
-              border: '3px solid #fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: '22px',
-              fontWeight: 900,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
             }}
           >
-            {initials}
-          </div>
+            {form.avatarUrl ? (
+              <img
+                src={form.avatarUrl}
+                alt="Profile"
+                style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: '3px solid var(--bg-surface)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  display: 'block',
+                  opacity: avatarBusy ? 0.6 : 1,
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  background: 'var(--accent-primary)',
+                  border: '3px solid var(--bg-surface)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontSize: '22px',
+                  fontWeight: 900,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  opacity: avatarBusy ? 0.6 : 1,
+                }}
+              >
+                {initials}
+              </div>
+            )}
+            <span
+              style={{
+                position: 'absolute',
+                bottom: '-2px',
+                right: '-2px',
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                background: 'var(--accent-primary)',
+                border: '2px solid var(--bg-surface)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+              }}
+            >
+              📷
+            </span>
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            style={{ display: 'none' }}
+            onChange={handleAvatarPick}
+          />
         </div>
+        {(avatarError || form.avatarUrl) && (
+          <div style={{ textAlign: 'center', marginTop: '-8px', marginBottom: '10px' }}>
+            {avatarError ? (
+              <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: 600 }}>
+                {avatarError}
+              </span>
+            ) : (
+              <button
+                onClick={() => applyAvatar(null)}
+                disabled={avatarBusy}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Remove photo
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Role badge — sourced from the role registry so custom roles
             (Developer, Admin, ...) render correctly, not just superadmin/user. */}
@@ -14787,7 +14910,13 @@ function AppContent() {
   useEffect(() => {
     const restore = (u, roleName) => {
       const roleId = u.roleId || LEGACY_ROLE_TO_ROLE_ID[roleName] || getDefaultRoleId();
-      setCurrentUser({ name: u.name, email: u.email, department: u.department, roleId });
+      setCurrentUser({
+        name: u.name,
+        email: u.email,
+        department: u.department,
+        avatarUrl: u.avatarUrl || null,
+        roleId,
+      });
       setRole(roleName);
       setIsAuthenticated(true);
       setAuditActor({ name: u.name, email: u.email });
@@ -14862,7 +14991,13 @@ function AppContent() {
 
   const handleLogin = user => {
     const roleId = user.roleId || LEGACY_ROLE_TO_ROLE_ID[user.role] || getDefaultRoleId();
-    setCurrentUser({ name: user.name, email: user.email, department: user.department, roleId });
+    setCurrentUser({
+      name: user.name,
+      email: user.email,
+      department: user.department,
+      avatarUrl: user.avatarUrl || null,
+      roleId,
+    });
     setRole(user.role);
     setIsAuthenticated(true);
     setAuthStatus('in');
@@ -15533,7 +15668,15 @@ function AppContent() {
                   flexShrink: 0,
                 }}
               >
-                <div style={S.avatar}>{initials}</div>
+                {effectiveUser?.avatarUrl ? (
+                  <img
+                    src={effectiveUser.avatarUrl}
+                    alt=""
+                    style={{ ...S.avatar, objectFit: 'cover', display: 'block' }}
+                  />
+                ) : (
+                  <div style={S.avatar}>{initials}</div>
+                )}
                 <span
                   className="pomelo-avatar-name"
                   style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 600 }}

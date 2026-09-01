@@ -15,3 +15,7 @@ export const createUser = payload => wrap(async () => (await api.post('/api/user
 // enforces the per-field capability (users.edit / roles.assign / users.delete).
 export const updateUser = (id, updates) =>
   wrap(async () => (await api.patch(`/api/users/${id}`, updates)).data);
+
+// Self-service: set (data-URL) or clear (null) the caller's own avatar.
+export const setMyAvatar = avatarUrl =>
+  wrap(async () => (await api.put('/api/users/me/avatar', { avatarUrl })).data);
