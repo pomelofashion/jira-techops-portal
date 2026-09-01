@@ -694,10 +694,25 @@ const ticketFromApi = t => ({
   jiraKey: t.jiraKey,
   jiraSyncState: t.jiraSyncState,
   jiraSyncedAt: t.jiraSyncedAt,
+  conversationHidden: !!t.conversationHidden,
+  lastMessageAt: t.lastMessageAt || null,
+  lastMessageAuthorEmail: t.lastMessageAuthorEmail || null,
+  lastReadAt: t.lastReadAt || null,
   timeline: (t.timeline || []).map(x => ({ date: x.date, action: x.action, actor: x.actor })),
   messages: (t.comments || [])
     .filter(c => !c.internal)
-    .map(c => ({ from: c.author, time: c.time, text: c.body })),
+    .map(c => ({
+      id: c.id,
+      from: c.author,
+      authorEmail: c.authorEmail || null,
+      time: c.time,
+      text: c.body,
+      mentions: c.mentions || [],
+      synced: true,
+    })),
+  internalNotes: (t.comments || [])
+    .filter(c => c.internal)
+    .map(c => ({ id: c.id, author: c.author, ts: c.time, text: c.body })),
   pullRequests: [],
 });
 
@@ -3750,6 +3765,29 @@ function StatusDropdown({ status, onChange, disabled }) {
 }
 
 // ─── Ticket Detail ────────────────────────────────────────────────────────────
+// Highlight @Name spans for names actually mentioned on the message.
+// Pure string split — React escapes everything; no HTML surface.
+function renderWithMentions(text, mentions) {
+  if (!mentions || mentions.length === 0) return text;
+  const names = mentions.map(m => m.name).filter(Boolean);
+  if (!names.length) return text;
+  const re = new RegExp(
+    `(@(?:${names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}))`,
+    'g'
+  );
+  return String(text)
+    .split(re)
+    .map((part, i) =>
+      part.startsWith('@') && names.includes(part.slice(1)) ? (
+        <span key={i} style={{ fontWeight: 800, textDecoration: 'underline' }}>
+          {part}
+        </span>
+      ) : (
+        part
+      )
+    );
+}
+
 function TicketDetail({
   ticket,
   onBack,
@@ -3763,6 +3801,10 @@ function TicketDetail({
   const isAssignedToMe =
     !!currentUser?.email && !!ticket.assigneeEmail && ticket.assigneeEmail === currentUser.email;
   const canViewAll = can('tickets.view_all');
+  const canInternalNotes = can('tickets.internal_notes');
+  const isRequester =
+    !!currentUser?.email && ticket.requester?.email?.toLowerCase() === currentUser.email;
+  const isSuperadminRole = currentUser?.roleId === 'role_superadmin';
   const canChangeStatus =
     can('tickets.status_change_any') || (isAssignedToMe && can('tickets.status_change_own'));
   const canDeleteTicket = can('tickets.delete');
@@ -3781,6 +3823,57 @@ function TicketDetail({
   const [linkRelation, setLinkRelation] = useState('relates to');
   const [linkTarget, setLinkTarget] = useState('');
   const messagesEndRef = useRef(null);
+
+  // Conversation privacy: the server's conversationHidden flag is the truth;
+  // until the detail fetch lands (and in mock mode) mirror its rule locally —
+  // requester + current assignee + superadmins only.
+  const [convoHidden, setConvoHidden] = useState(
+    API_ENABLED ? !(isSuperadminRole || isRequester || isAssignedToMe) : false
+  );
+  const [mentionable, setMentionable] = useState([]);
+  const [mentionChips, setMentionChips] = useState([]); // [{name,email}] picked this draft
+  const [mentionQuery, setMentionQuery] = useState(null); // {token} | null
+
+  // Hydrate the persisted conversation + internal notes (the list endpoint
+  // carries no comments) and stamp the caller's read cursor.
+  useEffect(() => {
+    if (!API_ENABLED || !ticket.uuid) return;
+    let cancelled = false;
+    ticketsApi.getTicket(ticket.uuid).then(res => {
+      if (cancelled || !res.data) return;
+      const full = ticketFromApi(res.data);
+      setConvoHidden(!!full.conversationHidden);
+      // Server rows replace the seed; keep local rows still awaiting their ack.
+      setMessages(prev => [...full.messages, ...prev.filter(m => !m.id && m.synced === false)]);
+      setInternalNotes(full.internalNotes);
+      mirror(ticketsApi.markTicketRead(ticket.uuid));
+    });
+    ticketsApi.getMentionable(ticket.uuid).then(res => {
+      if (!cancelled && res.data?.users) setMentionable(res.data.users);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ticket.uuid]);
+
+  // '@token' at the end of the draft opens the mention dropdown.
+  const handleComposerChange = value => {
+    setNewMsg(value);
+    const m = value.match(/(^|\s)@([\w .-]{0,30})$/);
+    setMentionQuery(m ? { token: m[2] } : null);
+  };
+  const mentionMatches = mentionQuery
+    ? mentionable
+        .filter(u => u.name.toLowerCase().includes(mentionQuery.token.toLowerCase()))
+        .slice(0, 6)
+    : [];
+  const pickMention = u => {
+    setNewMsg(v => v.replace(/(^|\s)@([\w .-]{0,30})$/, `$1@${u.name} `));
+    setMentionChips(prev =>
+      prev.some(m => m.email === u.email) ? prev : [...prev, { name: u.name, email: u.email }]
+    );
+    setMentionQuery(null);
+  };
 
   const subtasks = MOCK_TICKETS.filter(t => t.parentId === ticket.id);
   const parentTicket = ticket.parentId ? MOCK_TICKETS.find(t => t.id === ticket.parentId) : null;
@@ -4008,6 +4101,8 @@ function TicketDetail({
     if (!ticket.internalNotes) ticket.internalNotes = [];
     ticket.internalNotes.push(note);
     bumpTickets();
+    // Persist — internal notes survive reloads now (admin tier only).
+    mirror(ticket.uuid && ticketsApi.addComment(ticket.uuid, text, { internal: true }));
     setNewNote('');
     recordAudit('ticket.internal_note', _currentActor, {
       type: 'ticket',
@@ -4019,10 +4114,14 @@ function TicketDetail({
   const sendMsg = async () => {
     if (!newMsg.trim()) return;
     const text = newMsg.trim();
+    // A mention chip only counts while its @Name still appears in the text.
+    const activeMentions = mentionChips.filter(m => text.includes(`@${m.name}`));
     const localMsg = {
       from: _currentActor?.name || 'You',
+      authorEmail: currentUser?.email || null,
       time: new Date().toISOString().slice(0, 16).replace('T', ' '),
       text,
+      mentions: activeMentions,
       synced: false,
     };
     setMessages(prev => [...prev, localMsg]);
@@ -4035,8 +4134,17 @@ function TicketDetail({
       ticketId: ticket.id,
     });
 
-    // Persist the comment to the backend when this ticket is a server row.
-    mirror(ticket.uuid && ticketsApi.addComment(ticket.uuid, text));
+    // Persist the comment to the backend when this ticket is a server row;
+    // re-stamp the read cursor so our own message doesn't look unread.
+    mirror(
+      ticket.uuid &&
+        ticketsApi.addComment(ticket.uuid, text, { mentions: activeMentions }).then(res => {
+          if (!res?.error) mirror(ticket.uuid && ticketsApi.markTicketRead(ticket.uuid));
+          return res;
+        })
+    );
+    setMentionChips([]);
+    setMentionQuery(null);
 
     // Fire-and-forget push to Jira when the ticket is linked
     if (ticket.jiraKey) {
@@ -4072,9 +4180,10 @@ function TicketDetail({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // On open, if this ticket is linked to Jira, pull any newer comments
+  // On open, if this ticket is linked to Jira, pull any newer comments.
+  // Gated on conversation access — the Jira thread IS the conversation.
   useEffect(() => {
-    if (!ticket?.jiraKey) return;
+    if (!ticket?.jiraKey || convoHidden) return;
     let cancelled = false;
     (async () => {
       try {
@@ -4110,7 +4219,7 @@ function TicketDetail({
     return () => {
       cancelled = true;
     };
-  }, [ticket?.jiraKey]);
+  }, [ticket?.jiraKey, convoHidden]);
 
   return (
     <div>
@@ -4740,7 +4849,7 @@ function TicketDetail({
           preview) and Jira-side attachments (linked at their Jira content URLs). */}
       <TicketAttachments local={ticket.attachments} jira={jiraDetail?.attachments} />
 
-      {canViewAll && (
+      {canInternalNotes && (
         <div style={{ ...S.card, marginBottom: '20px', borderLeft: '4px solid #FBBF24' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
             <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)' }}>
@@ -5679,133 +5788,212 @@ function TicketDetail({
         >
           Messages
         </div>
-        <div
-          style={{
-            maxHeight: '280px',
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            marginBottom: '16px',
-          }}
-        >
-          {messages.map((m, i) => {
-            const isYou = m.from === 'You';
-            return (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  flexDirection: isYou ? 'row-reverse' : 'row',
-                  gap: '8px',
-                  alignItems: 'flex-end',
-                }}
-              >
-                <div
-                  style={{
-                    width: '28px',
-                    height: '28px',
-                    borderRadius: '50%',
-                    flexShrink: 0,
-                    background: isYou ? 'var(--accent-primary)' : '#111111',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#fff',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                  }}
-                >
-                  {m.from[0]}
-                </div>
-                <div style={{ maxWidth: '70%' }}>
-                  <div
-                    style={{
-                      fontSize: '11px',
-                      color: 'var(--text-muted)',
-                      marginBottom: '3px',
-                      textAlign: isYou ? 'right' : 'left',
-                    }}
-                  >
-                    {m.from} · {m.time}
-                  </div>
-                  <div
-                    style={{
-                      background: isYou ? 'var(--accent-primary)' : 'var(--bg-hover)',
-                      color: isYou ? '#fff' : 'var(--text-secondary)',
-                      padding: '10px 14px',
-                      borderRadius: isYou ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
-                      fontSize: '13px',
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {m.text}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          <div ref={messagesEndRef} />
-        </div>
-        {!DONE_STATUSES.has(ticket.status) && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {canViewAll && (
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {[
-                  [
-                    'Suggest a reply…',
-                    `Hi ${ticket.requester?.name?.split(' ')[0] || 'there'}, thanks for the report — we're looking into this now and will update you here shortly.`,
-                  ],
-                  [
-                    'Can I get more info…?',
-                    'Could you share a bit more detail — exact steps to reproduce, the account or shop affected, and a screenshot if possible?',
-                  ],
-                  ['Status update…', `Quick update: this ticket is currently "${ticket.status}". `],
-                ].map(([label, template]) => (
-                  <button
-                    key={label}
-                    onClick={() => setNewMsg(template)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '100px',
-                      border: '1px solid var(--border-default)',
-                      background: 'var(--bg-page)',
-                      color: 'var(--text-secondary)',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                value={newMsg}
-                onChange={e => setNewMsg(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMsg()}
-                placeholder="Type a message…"
-                style={{ ...S.input, flex: 1 }}
-              />
-              <button onClick={sendMsg} style={{ ...S.orangeBtn, whiteSpace: 'nowrap' }}>
-                Send
-              </button>
-            </div>
-          </div>
-        )}
-        {DONE_STATUSES.has(ticket.status) && (
+        {convoHidden ? (
           <div
             style={{
               fontSize: '13px',
               color: 'var(--text-muted)',
               textAlign: 'center',
-              padding: '8px',
+              padding: '18px 8px',
             }}
           >
-            This ticket is closed.
+            🔒 This conversation is private to the requester, the current assignee, and superadmins.
           </div>
+        ) : (
+          <>
+            <div
+              style={{
+                maxHeight: '280px',
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                marginBottom: '16px',
+              }}
+            >
+              {messages.map((m, i) => {
+                const isYou = m.authorEmail
+                  ? m.authorEmail === currentUser?.email
+                  : m.from === 'You' || m.from === (_currentActor?.name || '');
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      flexDirection: isYou ? 'row-reverse' : 'row',
+                      gap: '8px',
+                      alignItems: 'flex-end',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        flexShrink: 0,
+                        background: isYou ? 'var(--accent-primary)' : '#111111',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#fff',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {m.from[0]}
+                    </div>
+                    <div style={{ maxWidth: '70%' }}>
+                      <div
+                        style={{
+                          fontSize: '11px',
+                          color: 'var(--text-muted)',
+                          marginBottom: '3px',
+                          textAlign: isYou ? 'right' : 'left',
+                        }}
+                      >
+                        {m.from} · {m.time}
+                      </div>
+                      <div
+                        style={{
+                          background: isYou ? 'var(--accent-primary)' : 'var(--bg-hover)',
+                          color: isYou ? '#fff' : 'var(--text-secondary)',
+                          padding: '10px 14px',
+                          borderRadius: isYou ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+                          fontSize: '13px',
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {renderWithMentions(m.text, m.mentions)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+            {!DONE_STATUSES.has(ticket.status) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {canViewAll && (
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {[
+                      [
+                        'Suggest a reply…',
+                        `Hi ${ticket.requester?.name?.split(' ')[0] || 'there'}, thanks for the report — we're looking into this now and will update you here shortly.`,
+                      ],
+                      [
+                        'Can I get more info…?',
+                        'Could you share a bit more detail — exact steps to reproduce, the account or shop affected, and a screenshot if possible?',
+                      ],
+                      [
+                        'Status update…',
+                        `Quick update: this ticket is currently "${ticket.status}". `,
+                      ],
+                    ].map(([label, template]) => (
+                      <button
+                        key={label}
+                        onClick={() => setNewMsg(template)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '100px',
+                          border: '1px solid var(--border-default)',
+                          background: 'var(--bg-page)',
+                          color: 'var(--text-secondary)',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '8px', position: 'relative' }}>
+                  {mentionQuery && mentionMatches.length > 0 && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: 'calc(100% + 6px)',
+                        left: 0,
+                        zIndex: 40,
+                        width: '280px',
+                        maxHeight: '190px',
+                        overflowY: 'auto',
+                        background: 'var(--bg-elevated)',
+                        border: '1px solid var(--border-strong)',
+                        borderRadius: '10px',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                        padding: '4px',
+                      }}
+                    >
+                      {mentionMatches.map(u => (
+                        <button
+                          key={u.email}
+                          type="button"
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            pickMention(u);
+                          }}
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '7px 10px',
+                            borderRadius: '7px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontSize: '13px',
+                            color: 'var(--text-primary)',
+                          }}
+                        >
+                          @{u.name}{' '}
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                            {u.email}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    value={newMsg}
+                    onChange={e => handleComposerChange(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Escape' && mentionQuery) {
+                        setMentionQuery(null);
+                        return;
+                      }
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        if (mentionQuery && mentionMatches.length > 0) {
+                          e.preventDefault();
+                          pickMention(mentionMatches[0]);
+                          return;
+                        }
+                        sendMsg();
+                      }
+                    }}
+                    placeholder="Type a message… (@ to tag someone)"
+                    style={{ ...S.input, flex: 1 }}
+                  />
+                  <button onClick={sendMsg} style={{ ...S.orangeBtn, whiteSpace: 'nowrap' }}>
+                    Send
+                  </button>
+                </div>
+              </div>
+            )}
+            {DONE_STATUSES.has(ticket.status) && (
+              <div
+                style={{
+                  fontSize: '13px',
+                  color: 'var(--text-muted)',
+                  textAlign: 'center',
+                  padding: '8px',
+                }}
+              >
+                This ticket is closed — the transcript stays available for look-back.
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -8680,9 +8868,11 @@ function SubmitPage({ setSection, showToast, currentUser }) {
   );
 }
 
-function MyTicketsPage({ role, currentUser }) {
+function MyTicketsPage({ role, currentUser, openTicketKey, onOpenedTicket }) {
   const can = useCan();
-  const [, _setTicketsVersion] = useState(0);
+  // The store array mutates IN PLACE (replaceArrayInPlace), so its reference
+  // never changes — memos below must key on the version, not the array.
+  const [ticketsVersion, _setTicketsVersion] = useState(0);
   useEffect(() => subscribeTickets(_setTicketsVersion), []);
   const tickets = MOCK_TICKETS;
   const [filter, setFilter] = usePersistentState('mytickets-filter', 'All');
@@ -8692,6 +8882,18 @@ function MyTicketsPage({ role, currentUser }) {
   const [selectedId, setSelectedId] = useState(null);
   const selected = selectedId ? tickets.find(t => t.id === selectedId) : null;
   const [bulkIds, setBulkIds] = useState(new Set());
+
+  // Deep link from a notification: open that ticket once it's in the store.
+  // No dependency array on purpose — the store mutates in place (version bump
+  // re-renders), so a cheap guarded check per render is the reliable hook.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!openTicketKey) return;
+    if (tickets.some(t => t.id === openTicketKey)) {
+      setSelectedId(openTicketKey);
+      onOpenedTicket?.();
+    }
+  });
   const [refreshMsg, setRefreshMsg] = useState('');
   const { addNotification } = useNotifications();
 
@@ -8715,7 +8917,8 @@ function MyTicketsPage({ role, currentUser }) {
     if (isAdmin) return tickets;
     const email = currentUser?.email?.toLowerCase();
     return tickets.filter(t => t.requester?.email?.toLowerCase() === email);
-  }, [tickets, isAdmin, currentUser?.email]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickets, ticketsVersion, isAdmin, currentUser?.email]);
 
   const filtered = useMemo(() => {
     const now = Date.now();
@@ -8733,7 +8936,10 @@ function MyTicketsPage({ role, currentUser }) {
       }
       return true;
     });
-  }, [visibleTickets, filter, priorityFilter, assigneeFilter, staleOnly, isAdmin]);
+    // ticketsVersion: visibleTickets can be the same mutated-in-place array
+    // (admins get the raw store), so the version must bust this memo too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleTickets, ticketsVersion, filter, priorityFilter, assigneeFilter, staleOnly, isAdmin]);
 
   const handleStatusChange = (id, newStatus) => {
     const ticket = tickets.find(t => t.id === id);
@@ -9109,6 +9315,24 @@ function MyTicketsPage({ role, currentUser }) {
                     flexWrap: 'wrap',
                   }}
                 >
+                  {/* Unread dot: someone else wrote after this user's last read. */}
+                  {t.lastMessageAt &&
+                    t.lastMessageAuthorEmail &&
+                    t.lastMessageAuthorEmail !== currentUser?.email &&
+                    (!t.lastReadAt || t.lastMessageAt > t.lastReadAt) && (
+                      <span
+                        title="New messages"
+                        aria-label="Unread messages"
+                        style={{
+                          width: '9px',
+                          height: '9px',
+                          borderRadius: '50%',
+                          background: 'var(--accent-primary)',
+                          flexShrink: 0,
+                          display: 'inline-block',
+                        }}
+                      />
+                    )}
                   <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                     {t.title}
                   </span>
@@ -9209,7 +9433,7 @@ function DeveloperPortalPage({ currentUser }) {
     );
     if (t.jiraKey) pushJiraTransition(t, newStatus).catch(() => {});
     addNotification({
-      type: 'ticket_status',
+      type: 'status_change',
       title: `Status updated: ${t.id}`,
       body: `${prev} → ${newStatus}`,
       ticketId: t.id,
@@ -13539,7 +13763,7 @@ function BoardSectionHost({ currentUser, setSection, activeBoard }) {
       { from: prev, to: newStatus }
     );
     addNotification({
-      type: 'ticket_status',
+      type: 'status_change',
       title: `Status updated: ${id}`,
       body: `${prev} → ${newStatus}`,
       ticketId: id,
@@ -14293,6 +14517,8 @@ function AppContent() {
   }, [section, activeBoardKey, spacesVersion]);
 
   const [toast, setToast] = useState(null);
+  // Notification deep link: which ticket My Tickets should auto-open.
+  const [pendingTicketKey, setPendingTicketKey] = useState(null);
   const [role, setRole] = useState('user');
   const [profileOpen, setProfileOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
@@ -14632,7 +14858,14 @@ function AppContent() {
         );
         break;
       case 'mytickets':
-        page = <MyTicketsPage role={effectiveRole} currentUser={effectiveUser} />;
+        page = (
+          <MyTicketsPage
+            role={effectiveRole}
+            currentUser={effectiveUser}
+            openTicketKey={pendingTicketKey}
+            onOpenedTicket={() => setPendingTicketKey(null)}
+          />
+        );
         break;
       case 'board':
         page = (
@@ -15005,7 +15238,12 @@ function AppContent() {
               )}
 
               {/* Notification bell */}
-              <NotificationBell onNavigate={target => setSection(target)} />
+              <NotificationBell
+                onNavigate={(target, ticketId) => {
+                  setSection(target);
+                  if (target === 'mytickets' && ticketId) setPendingTicketKey(ticketId);
+                }}
+              />
 
               {/* Theme toggle — light/dark switch, visible to all users */}
               <ThemeToggleButton />

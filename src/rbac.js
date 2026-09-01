@@ -120,7 +120,13 @@ export const CAPABILITIES = Object.freeze([
     id: 'tickets.comment',
     group: 'Tickets',
     label: 'Comment on tickets',
-    description: 'Post a comment or internal note on a ticket.',
+    description: 'Post a message in a ticket conversation you are part of.',
+  },
+  {
+    id: 'tickets.internal_notes',
+    group: 'Tickets',
+    label: 'Internal staff notes',
+    description: 'Post and read the internal notes thread on tickets (admin tier only).',
   },
   {
     id: 'tickets.edit_all',
@@ -298,6 +304,7 @@ export const SEED_ROLES = Object.freeze([
       'tickets.status_change_own',
       'tickets.delete',
       'tickets.comment',
+      'tickets.internal_notes',
       'tickets.edit_all',
       'incidents.manage',
       'problems.manage',
@@ -397,4 +404,4 @@ export const DEFAULT_ROLE_ID = 'role_user';
 export const SEED_EMAIL_REWRITE = Object.freeze({});
 
 // Bump this when the migration changes shape so future boots re-run it.
-export const RBAC_SCHEMA_VERSION = 3;
+export const RBAC_SCHEMA_VERSION = 4;

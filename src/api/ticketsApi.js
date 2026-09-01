@@ -35,8 +35,26 @@ export const assignTicket = (id, assigneeEmail, assigneeName) =>
       ).data
   );
 
-export const addComment = (id, body, internal = false) =>
-  wrap(async () => (await api.post(`/api/tickets/${id}/comments`, { body, internal })).data);
+// opts: { internal?: boolean, mentions?: [{name, email}] }
+export const addComment = (id, body, opts = {}) =>
+  wrap(
+    async () =>
+      (
+        await api.post(`/api/tickets/${id}/comments`, {
+          body,
+          internal: !!opts.internal,
+          mentions: opts.mentions || [],
+        })
+      ).data
+  );
+
+// Who the caller may @mention on this ticket (tiered directory).
+export const getMentionable = id =>
+  wrap(async () => (await api.get(`/api/tickets/${id}/mentionable`)).data);
+
+// Upsert the caller's conversation read cursor (powers unread badges).
+export const markTicketRead = id =>
+  wrap(async () => (await api.post(`/api/tickets/${id}/read`)).data);
 
 export const deleteTicket = id => wrap(async () => (await api.delete(`/api/tickets/${id}`)).data);
 

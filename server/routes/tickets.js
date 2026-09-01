@@ -14,14 +14,21 @@
 //     when you are the assignee.
 //   • Assign: tickets.assign (assign/claim), tickets.reassign_any to move a
 //     ticket off someone else.
-//   • Comment: tickets.comment. Internal notes require tickets.view_all (staff).
+//   • Conversation (public messages): requester + assignee + superadmins only
+//     (canSeeConversation). Internal notes: tickets.internal_notes (admin tier).
 //   • Delete: tickets.delete.
 
 import { Router } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db.js';
 import { requireAuth, writeAudit, makeToken, hashToken } from '../auth.js';
-import { sendCsatEmail } from '../email.js';
+import {
+  sendCsatEmail,
+  sendTicketCreatedEmail,
+  sendStatusChangeEmail,
+  sendReplyEmail,
+  sendMentionEmail,
+} from '../email.js';
 import {
   computeDueDates,
   recomputeDueDates,
@@ -37,6 +44,16 @@ router.use(requireAuth);
 
 const can = (user, cap) =>
   Array.isArray(user.role?.capabilities) && user.role.capabilities.includes(cap);
+
+// Superadmin is a role-tier check, not a capability — conversation privacy
+// shouldn't be acquirable by toggling capabilities on a custom role.
+const isSuperadmin = user => user.roleId === 'role_superadmin';
+
+// The ticket CONVERSATION is narrower than ticket visibility: only the
+// requester, the current assignee, and superadmins may read or post messages.
+// Board members still see the ticket's fields — never its thread.
+const canSeeConversation = (user, t) =>
+  isSuperadmin(user) || t.requester_email === user.email || t.assignee_email === user.email;
 
 // Policy lookup for SLA due-date stamping. Missing row → no deadlines (SLA
 // simply not tracked for that priority) rather than an error.
@@ -94,8 +111,10 @@ const serializeTicket = (r, extra = {}) => ({
 const serializeComment = c => ({
   id: c.id,
   author: c.author,
+  authorEmail: c.author_email || null,
   body: c.body,
   internal: c.internal,
+  mentions: c.mentions || [],
   time: c.created_at,
 });
 const serializeTimeline = t => ({ id: t.id, action: t.action, actor: t.actor, date: t.created_at });
@@ -196,16 +215,40 @@ router.get('/', async (req, res, next) => {
     }
 
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    // Latest public message + the caller's read cursor power unread badges.
+    // The count query reuses `clause` but not the join params — the email,
+    // limit, and offset params are appended AFTER every filter param and all
+    // three are sliced off for the count. Keep that invariant.
+    params.push(req.user.email);
+    const readParam = params.length;
     params.push(limit, offset);
     const { rows } = await query(
-      `SELECT * FROM tickets ${clause} ORDER BY created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      `SELECT t.*, lm.last_message_at, lm.last_message_author_email, tr.last_read_at
+         FROM tickets t
+         LEFT JOIN LATERAL (
+           SELECT c.created_at AS last_message_at, c.author_email AS last_message_author_email
+             FROM ticket_comments c
+            WHERE c.ticket_id = t.id AND NOT c.internal
+            ORDER BY c.created_at DESC LIMIT 1
+         ) lm ON TRUE
+         LEFT JOIN ticket_reads tr ON tr.ticket_id = t.id AND tr.user_email = $${readParam}
+         ${clause} ORDER BY t.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
     const countRes = await query(
       `SELECT count(*)::int AS total FROM tickets ${clause}`,
-      params.slice(0, -2)
+      params.slice(0, -3)
     );
-    res.json({ tickets: rows.map(r => serializeTicket(r)), total: countRes.rows[0].total });
+    res.json({
+      tickets: rows.map(r =>
+        serializeTicket(r, {
+          lastMessageAt: r.last_message_at || null,
+          lastMessageAuthorEmail: r.last_message_author_email || null,
+          lastReadAt: r.last_read_at || null,
+        })
+      ),
+      total: countRes.rows[0].total,
+    });
   } catch (err) {
     next(err);
   }
@@ -279,12 +322,14 @@ router.get('/:id', async (req, res, next) => {
       'SELECT * FROM tickets WHERE parent_id=$1 ORDER BY created_at ASC',
       [ticket.id]
     );
-    // Internal notes are staff-only.
-    const visibleComments = can(req.user, 'tickets.view_all')
-      ? comments.rows
-      : comments.rows.filter(c => !c.internal);
+    // Two independent audiences: the conversation (requester + assignee +
+    // superadmins) and internal notes (tickets.internal_notes holders).
+    const seeConvo = canSeeConversation(req.user, ticket);
+    const seeInternal = can(req.user, 'tickets.internal_notes');
+    const visibleComments = comments.rows.filter(c => (c.internal ? seeInternal : seeConvo));
     res.json(
       serializeTicket(ticket, {
+        conversationHidden: !seeConvo,
         comments: visibleComments.map(serializeComment),
         timeline: timeline.rows.map(serializeTimeline),
         links: await loadLinks(ticket.id),
@@ -575,6 +620,14 @@ router.post('/', async (req, res, next) => {
       });
     }
     await writeAudit(req.user.email, 'ticket.create', ticket.key);
+    // Receipt: confirm to the requester that their ticket is in the queue.
+    if (ticket.requester_email) {
+      sendTicketCreatedEmail(ticket.requester_email, ticket.key, ticket.title).catch(err =>
+        console.error(
+          JSON.stringify({ level: 'error', msg: 'ticket-created email failed', error: err.message })
+        )
+      );
+    }
     res.status(201).json(serializeTicket(ticket));
   } catch (err) {
     next(err);
@@ -781,6 +834,51 @@ router.patch('/:id', async (req, res, next) => {
       }
       return t;
     });
+    // Milestone status changes notify + email. Silent for the internal
+    // shuffling statuses (QA / code review columns); re-entering a milestone
+    // re-notifies by design.
+    const MILESTONE_STATUSES = new Set([
+      'In Progress',
+      'Waiting for Customer',
+      'Ready to Release',
+      'Live',
+      "Closed - Won't Do",
+    ]);
+    if (
+      d.status &&
+      d.status !== ticket.status &&
+      ticket.record_type === 'ticket' &&
+      MILESTONE_STATUSES.has(d.status)
+    ) {
+      // Bell: the people living with this ticket (requester/assignee/watchers).
+      const bellTargets = [
+        updated.requester_email,
+        updated.assignee_email,
+        ...(updated.watchers || []),
+      ];
+      for (const email of [...new Set(bellTargets)].filter(e => e && e !== req.user.email)) {
+        await query(
+          `INSERT INTO notifications (user_email, type, title, body, ticket_id)
+           VALUES ($1,'status_change',$2,$3,$4)`,
+          [email, `${ticket.key} is now ${d.status}`, updated.title, ticket.id]
+        );
+      }
+      // Email: every active superadmin + the requester (dedupe, skip actor).
+      const supers = await query(
+        `SELECT email FROM users WHERE active = TRUE AND role_id = 'role_superadmin'`
+      );
+      const emailTargets = new Set(supers.rows.map(r => r.email));
+      if (updated.requester_email) emailTargets.add(updated.requester_email);
+      emailTargets.delete(req.user.email);
+      for (const email of emailTargets) {
+        sendStatusChangeEmail(email, ticket.key, updated.title, d.status).catch(err =>
+          console.error(
+            JSON.stringify({ level: 'error', msg: 'status email failed', error: err.message })
+          )
+        );
+      }
+    }
+
     // Resolution CSAT: first transition into a satisfied-done status invites
     // the requester to rate. "Closed - Won't Do" is excluded — no satisfied
     // resolution happened. One survey per ticket (UNIQUE ticket_id).
@@ -1035,11 +1133,133 @@ router.post('/:id/assign', async (req, res, next) => {
   }
 });
 
+// ─── Mentions directory + read cursor ─────────────────────────────────────────
+// Who a caller may @mention on this ticket. Staff (tickets.view_all) get the
+// full active directory; everyone else gets the admin tier plus the current
+// assignee — regular users can't harvest the employee list.
+async function mentionableSetFor(user, ticket) {
+  if (can(user, 'tickets.view_all')) {
+    const { rows } = await query(
+      'SELECT name, email FROM users WHERE active = TRUE ORDER BY name ASC LIMIT 50'
+    );
+    return rows;
+  }
+  const { rows } = await query(
+    `SELECT name, email FROM users
+      WHERE active = TRUE AND role_id IN ('role_superadmin','role_admin')
+      ORDER BY name ASC LIMIT 50`
+  );
+  const out = new Map(rows.map(u => [u.email, u]));
+  if (ticket.assignee_email && !out.has(ticket.assignee_email)) {
+    out.set(ticket.assignee_email, {
+      name: ticket.assignee_name || ticket.assignee_email,
+      email: ticket.assignee_email,
+    });
+  }
+  return Array.from(out.values());
+}
+
+router.get('/:id/mentionable', async (req, res, next) => {
+  try {
+    const { ticket, notFound, forbidden } = await loadVisible(req, req.params.id);
+    if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
+    const users = (await mentionableSetFor(req.user, ticket)).filter(
+      u => u.email !== req.user.email
+    );
+    res.json({ users });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Upsert the caller's conversation read cursor (powers unread badges).
+router.post('/:id/read', async (req, res, next) => {
+  try {
+    const { ticket, notFound, forbidden } = await loadVisible(req, req.params.id);
+    if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
+    await query(
+      `INSERT INTO ticket_reads (ticket_id, user_email) VALUES ($1,$2)
+       ON CONFLICT (ticket_id, user_email) DO UPDATE SET last_read_at = now()`,
+      [ticket.id, req.user.email]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// One place for who hears about a new public message: mentioned users get a
+// 'mention' (bell + email) and join the watchers list; the other side of the
+// conversation gets a 'ticket_message' (requester wrote → superadmins +
+// assignee; staff wrote → requester). Mention beats reply — nobody is pinged
+// twice for one message, and the author never pings themself.
+async function notifyCommentRecipients(req, ticket, body, mentions) {
+  const excerpt = body.length > 200 ? `${body.slice(0, 197)}…` : body;
+  const author = req.user;
+  const mentionEmails = new Set(mentions.map(m => m.email));
+
+  let replySide = [];
+  if (author.email === ticket.requester_email) {
+    const staff = await query(
+      `SELECT email FROM users WHERE active = TRUE AND role_id = 'role_superadmin'`
+    );
+    replySide = staff.rows.map(r => r.email);
+    if (ticket.assignee_email) replySide.push(ticket.assignee_email);
+  } else if (ticket.requester_email) {
+    replySide = [ticket.requester_email];
+  }
+  const replyEmails = [...new Set(replySide)].filter(
+    e => e && e !== author.email && !mentionEmails.has(e)
+  );
+
+  for (const m of mentions) {
+    await query(
+      `INSERT INTO notifications (user_email, type, title, body, ticket_id)
+       VALUES ($1,'mention',$2,$3,$4)`,
+      [m.email, `${author.name} mentioned you on ${ticket.key}`, excerpt, ticket.id]
+    );
+    sendMentionEmail(m.email, ticket.key, ticket.title, author.name, excerpt).catch(err =>
+      console.error(
+        JSON.stringify({ level: 'error', msg: 'mention email failed', error: err.message })
+      )
+    );
+  }
+  if (mentions.length) {
+    // Mentioned users start watching the ticket (SLA fan-out reaches them).
+    const watchers = new Set([...(ticket.watchers || []), ...mentions.map(m => m.email)]);
+    await query('UPDATE tickets SET watchers=$1::jsonb WHERE id=$2', [
+      JSON.stringify([...watchers]),
+      ticket.id,
+    ]);
+  }
+  for (const email of replyEmails) {
+    await query(
+      `INSERT INTO notifications (user_email, type, title, body, ticket_id)
+       VALUES ($1,'ticket_message',$2,$3,$4)`,
+      [email, `New message on ${ticket.key}`, excerpt, ticket.id]
+    );
+    sendReplyEmail(email, ticket.key, ticket.title, author.name, excerpt).catch(err =>
+      console.error(
+        JSON.stringify({ level: 'error', msg: 'reply email failed', error: err.message })
+      )
+    );
+  }
+}
+
 // ─── Comment ──────────────────────────────────────────────────────────────────
 router.post('/:id/comments', async (req, res, next) => {
   try {
     const schema = z
-      .object({ body: z.string().min(1).max(20000), internal: z.boolean().default(false) })
+      .object({
+        body: z.string().min(1).max(20000),
+        internal: z.boolean().default(false),
+        mentions: z
+          .array(z.object({ name: z.string().min(1).max(120), email: z.string().email() }).strict())
+          .max(10)
+          .default([]),
+      })
       .strict();
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
@@ -1049,15 +1269,47 @@ router.post('/:id/comments', async (req, res, next) => {
     if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
     if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
 
-    // Only staff may post internal notes.
-    const internal = parsed.data.internal && can(req.user, 'tickets.view_all');
+    // Fail loudly instead of the old silent downgrade: an internal note
+    // falling into the public thread would leak, and vice versa.
+    if (parsed.data.internal && !can(req.user, 'tickets.internal_notes'))
+      return res.status(403).json({ error: 'Internal notes are limited to the admin tier.' });
+    if (!parsed.data.internal && !canSeeConversation(req.user, ticket))
+      return res.status(403).json({ error: 'This conversation is private.' });
+    const internal = parsed.data.internal;
+
+    // Mentions never ride on internal notes (recipients couldn't read them),
+    // and only people the caller could have autocompleted count.
+    const mentions = [];
+    if (!internal && parsed.data.mentions.length) {
+      const allowed = new Map(
+        (await mentionableSetFor(req.user, ticket)).map(u => [u.email.toLowerCase(), u])
+      );
+      const seen = new Set();
+      for (const m of parsed.data.mentions) {
+        const email = m.email.toLowerCase();
+        if (email === req.user.email || seen.has(email) || !allowed.has(email)) continue;
+        seen.add(email);
+        mentions.push({ name: allowed.get(email).name || m.name, email });
+      }
+    }
+
     const { rows } = await query(
-      'INSERT INTO ticket_comments (ticket_id, author, body, internal) VALUES ($1,$2,$3,$4) RETURNING *',
-      [ticket.id, req.user.name, parsed.data.body, internal]
+      `INSERT INTO ticket_comments (ticket_id, author, author_email, body, internal, mentions)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,
+      [
+        ticket.id,
+        req.user.name,
+        req.user.email,
+        parsed.data.body,
+        internal,
+        JSON.stringify(mentions),
+      ]
     );
     await query('UPDATE tickets SET updated_at=now() WHERE id=$1', [ticket.id]);
-    // First public staff reply stops the response-SLA clock.
-    if (!internal && !ticket.first_response_at && can(req.user, 'tickets.view_all')) {
+    // First public non-requester reply stops the response-SLA clock. The
+    // conversation is requester/assignee/superadmin only, so any other public
+    // author IS the staff response (now works for non-view_all assignees too).
+    if (!internal && !ticket.first_response_at && req.user.email !== ticket.requester_email) {
       await query(
         'UPDATE tickets SET first_response_at = now() WHERE id=$1 AND first_response_at IS NULL',
         [ticket.id]
@@ -1067,6 +1319,14 @@ router.post('/:id/comments', async (req, res, next) => {
         'First response recorded (SLA)',
         req.user.email,
       ]);
+    }
+    // Fan-out for public messages (fire-and-forget — the comment is saved).
+    if (!internal) {
+      notifyCommentRecipients(req, ticket, parsed.data.body, mentions).catch(err =>
+        console.error(
+          JSON.stringify({ level: 'error', msg: 'comment fan-out failed', error: err.message })
+        )
+      );
     }
     await writeAudit(req.user.email, 'ticket.comment', ticket.key, { internal });
     res.status(201).json(serializeComment(rows[0]));

@@ -61,12 +61,84 @@ async function deliver({ to, subject, html, cc }) {
   return { delivered: true };
 }
 
-const wrap = (heading, body, cta) => `<div style="font-family:Inter,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#333">
+const wrap = (
+  heading,
+  body,
+  cta
+) => `<div style="font-family:Inter,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#333">
 <h2 style="color:#111;font-size:18px;margin-bottom:12px">${heading}</h2>
 <p style="color:#444;line-height:1.6;font-size:14px;margin-bottom:16px">${body}</p>
 ${cta ? `<p style="margin:20px 0"><a href="${cta.href}" style="display:inline-block;background:#6366F1;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-size:14px">${cta.label}</a></p>` : ''}
 <p style="color:#999;font-size:11px;margin-top:32px;border-top:1px solid #eee;padding-top:12px">Pomelo TechOps Portal<br>This is an automated notification. If you believe you received this in error, please contact your IT team.</p>
 </div>`;
+
+// User-generated text (ticket titles, message bodies) goes into HTML — escape.
+const esc = s =>
+  String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+// ─── Ticket communication senders (receipt / status / replies / mentions) ─────
+const STATUS_COPY = {
+  'In Progress': ['Work has started', 'is now being worked on.'],
+  'Waiting for Customer': [
+    'Your input is needed',
+    'is waiting on information from you — reply on the ticket to keep things moving.',
+  ],
+  'Ready to Release': ['Fix queued for release', 'has a fix ready and queued for release.'],
+  Live: ['Resolved', 'has been resolved and is live. Please verify everything looks right.'],
+  "Closed - Won't Do": ['Closed', "was reviewed and closed without changes (won't do)."],
+};
+
+export function sendStatusChangeEmail(to, ticketKey, ticketTitle, status) {
+  const [headline, line] = STATUS_COPY[status] || ['Status updated', `moved to ${esc(status)}.`];
+  return deliver({
+    to,
+    subject: `${ticketKey}: ${headline}`,
+    html: wrap(`${esc(ticketKey)} — ${headline}`, `<b>${esc(ticketTitle)}</b> ${line}`, {
+      href: `${APP_URL}/#mytickets`,
+      label: 'View the ticket',
+    }),
+  });
+}
+
+export function sendTicketCreatedEmail(to, ticketKey, ticketTitle) {
+  return deliver({
+    to,
+    subject: `We received your request — ${ticketKey}`,
+    html: wrap(
+      'Your ticket is in the queue',
+      `<b>${esc(ticketKey)}</b> — ${esc(ticketTitle)}<br/>The TechOps team has received your request. We'll email you as it progresses; replies land on your ticket in the portal.`,
+      { href: `${APP_URL}/#mytickets`, label: 'Track your ticket' }
+    ),
+  });
+}
+
+export function sendReplyEmail(to, ticketKey, ticketTitle, authorName, excerpt) {
+  return deliver({
+    to,
+    subject: `New message on ${ticketKey}`,
+    html: wrap(
+      `New message on ${esc(ticketKey)}`,
+      `<b>${esc(authorName)}</b> wrote on <b>${esc(ticketTitle)}</b>:<br/><i>"${esc(excerpt)}"</i>`,
+      { href: `${APP_URL}/#mytickets`, label: 'Open the conversation' }
+    ),
+  });
+}
+
+export function sendMentionEmail(to, ticketKey, ticketTitle, authorName, excerpt) {
+  return deliver({
+    to,
+    subject: `${authorName} mentioned you on ${ticketKey}`,
+    html: wrap(
+      `You were mentioned on ${esc(ticketKey)}`,
+      `<b>${esc(authorName)}</b> mentioned you on <b>${esc(ticketTitle)}</b>:<br/><i>"${esc(excerpt)}"</i>`,
+      { href: `${APP_URL}/#mytickets`, label: 'Open the ticket' }
+    ),
+  });
+}
 
 export function sendVerifyEmail(to, token) {
   const href = `${APP_URL}/verify?token=${token}`;
@@ -159,7 +231,7 @@ export function sendResetEmail(to, token) {
     subject: 'Reset your TechOps password',
     html: wrap(
       'Reset your password',
-      'We received a request to reset your password. This link expires in 1 hour. If you didn\'t ask for this, ignore this email.',
+      "We received a request to reset your password. This link expires in 1 hour. If you didn't ask for this, ignore this email.",
       { href, label: 'Reset password' }
     ),
   });
