@@ -6,8 +6,10 @@
 //   • Any authenticated user may submit a ticket (customers are the point).
 //   • Listing/reading:
 //       - tickets.view_all      → every ticket
-//       - tickets.view_assigned → tickets assigned to you (Developer Portal)
-//       - otherwise             → only tickets you requested
+//       - board membership      → every ticket on boards you belong to
+//                                 (space_members / board_members, migration 014)
+//       - tickets.view_assigned → plus tickets assigned to you
+//       - otherwise             → plus tickets you requested
 //   • Status change: tickets.status_change_any, OR tickets.status_change_own
 //     when you are the assignee.
 //   • Assign: tickets.assign (assign/claim), tickets.reassign_any to move a
@@ -28,6 +30,7 @@ import {
   SLA_DONE_STATUSES,
 } from '../lib/sla.js';
 import { createApproval } from './approvals.js';
+import { canSeeBoard, canSubmitToBoard, memberBoardIds } from '../lib/spacesAccess.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -66,6 +69,7 @@ const serializeTicket = (r, extra = {}) => ({
   parentId: r.parent_id,
   currentResult: r.current_result,
   expectedResult: r.expected_result,
+  boardId: r.board_id || null,
   jiraKey: r.jira_key,
   jiraSyncState: r.jira_sync_state,
   jiraSyncedAt: r.jira_synced_at,
@@ -110,6 +114,14 @@ export async function generateKey(prefix = 'TKT') {
   return `${prefix}-${year}-${Date.now().toString().slice(-6)}`;
 }
 
+// Default board (PESD1) — where records land when no routing applies. Also
+// used by problems/changes creation (their board routing is future work).
+// Null on a pre-014 database.
+export async function defaultBoardId() {
+  const { rows } = await query(`SELECT id FROM boards WHERE key='PESD1' LIMIT 1`);
+  return rows[0]?.id || null;
+}
+
 // ─── List ─────────────────────────────────────────────────────────────────────
 router.get('/', async (req, res, next) => {
   try {
@@ -118,20 +130,41 @@ router.get('/', async (req, res, next) => {
     const where = [];
     const params = [];
 
-    // Visibility scope.
+    // Visibility scope. Global staff see everything; everyone else sees the
+    // union of: tickets they requested, tickets assigned to them (with
+    // tickets.view_assigned), and every ticket on boards they belong to
+    // (space membership or per-account board grant — migration 014).
     if (can(req.user, 'tickets.view_all')) {
       // no scope filter
-    } else if (can(req.user, 'tickets.view_assigned')) {
-      params.push(req.user.email);
-      where.push(`assignee_email = $${params.length}`);
     } else {
+      const ors = [];
       params.push(req.user.email);
-      where.push(`requester_email = $${params.length}`);
+      ors.push(`requester_email = $${params.length}`);
+      if (can(req.user, 'tickets.view_assigned')) {
+        params.push(req.user.email);
+        ors.push(`assignee_email = $${params.length}`);
+      }
+      const memberBoards = memberBoardIds(req.user);
+      if (memberBoards.length) {
+        params.push(memberBoards);
+        ors.push(`board_id = ANY($${params.length}::uuid[])`);
+      }
+      where.push(`(${ors.join(' OR ')})`);
     }
 
     // Plain tickets only — problems (PRB) and changes (CHG) share the table
     // but have their own routers and views.
     where.push(`record_type = 'ticket'`);
+
+    // Optional board filter (the board view). Reject malformed uuids with a
+    // 400 instead of letting Postgres 500 on the cast.
+    if (req.query.boardId) {
+      const boardId = String(req.query.boardId);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(boardId))
+        return res.status(400).json({ error: 'Invalid boardId.' });
+      params.push(boardId);
+      where.push(`board_id = $${params.length}`);
+    }
 
     // Optional filters.
     if (req.query.status) {
@@ -186,7 +219,8 @@ async function loadVisible(req, id) {
   const allowed =
     can(req.user, 'tickets.view_all') ||
     t.assignee_email === req.user.email ||
-    t.requester_email === req.user.email;
+    t.requester_email === req.user.email ||
+    canSeeBoard(req.user, t.board_id);
   if (!allowed) return { forbidden: true };
   return { ticket: t };
 }
@@ -265,8 +299,6 @@ router.get('/:id', async (req, res, next) => {
 // ─── Links (staff) ────────────────────────────────────────────────────────────
 router.post('/:id/links', async (req, res, next) => {
   try {
-    if (!can(req.user, 'tickets.view_all'))
-      return res.status(403).json({ error: 'Insufficient permissions.' });
     const schema = z
       .object({ targetId: z.string().uuid(), relation: z.enum(LINK_RELATIONS) })
       .strict();
@@ -275,10 +307,14 @@ router.post('/:id/links', async (req, res, next) => {
     const { targetId, relation } = parsed.data;
     if (targetId === req.params.id)
       return res.status(400).json({ error: 'A ticket cannot link to itself.' });
-    const both = await query('SELECT id FROM tickets WHERE id = ANY($1::uuid[])', [
-      [req.params.id, targetId],
-    ]);
-    if (both.rows.length !== 2) return res.status(404).json({ error: 'Ticket not found.' });
+    // Linking requires read access to BOTH ends — otherwise a member of one
+    // board could harvest titles from another board via the link summaries.
+    const src = await loadVisible(req, req.params.id);
+    if (src.notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (src.forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
+    const tgt = await loadVisible(req, targetId);
+    if (tgt.notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (tgt.forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
     const { rows } = await query(
       `INSERT INTO ticket_links (source_id, target_id, relation, created_by)
        VALUES ($1,$2,$3,$4)
@@ -295,8 +331,9 @@ router.post('/:id/links', async (req, res, next) => {
 
 router.delete('/:id/links/:linkId', async (req, res, next) => {
   try {
-    if (!can(req.user, 'tickets.view_all'))
-      return res.status(403).json({ error: 'Insufficient permissions.' });
+    const vis = await loadVisible(req, req.params.id);
+    if (vis.notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (vis.forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
     const { rows } = await query(
       'DELETE FROM ticket_links WHERE id=$1 AND (source_id=$2 OR target_id=$2) RETURNING id',
       [req.params.linkId, req.params.id]
@@ -373,6 +410,7 @@ const createSchema = z
     parentId: z.string().uuid().optional(),
     currentResult: z.string().max(4000).optional(),
     expectedResult: z.string().max(4000).optional(),
+    boardId: z.string().uuid().optional(),
     requestTypeId: z.string().uuid().optional(),
     formValues: z.record(z.union([z.string().max(4000), z.boolean()])).optional(),
   })
@@ -438,17 +476,47 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: 'formValues requires a requestTypeId.' });
     }
 
-    const key = await generateKey();
+    // Board routing: explicit boardId (requires submit rights on that board)
+    // → request-type default (type-level routing may bypass membership, like
+    // defs.assigneeEmail above) → the default PESD1 board.
+    let boardId = null;
+    if (d.boardId) {
+      if (!canSubmitToBoard(req.user, d.boardId))
+        return res.status(403).json({ error: 'You cannot create tickets on that board.' });
+      boardId = d.boardId;
+    } else if (requestType?.defaults?.boardId) {
+      boardId = requestType.defaults.boardId;
+    }
+    if (boardId) {
+      const b = await query('SELECT id FROM boards WHERE id=$1 AND archived=FALSE', [boardId]);
+      if (!b.rows.length) return res.status(400).json({ error: 'Board not found.' });
+    } else {
+      boardId = await defaultBoardId();
+    }
+
     const ticket = await withTransaction(async client => {
+      // Per-board sequential key (KEY-n): the UPDATE takes a row lock on the
+      // board, serializing concurrent creates so numbers never collide. It
+      // MUST stay inside this transaction with the INSERT below.
+      let key;
+      if (boardId) {
+        const seq = await client.query(
+          'UPDATE boards SET next_seq = next_seq + 1 WHERE id=$1 RETURNING key, next_seq',
+          [boardId]
+        );
+        key = `${seq.rows[0].key}-${Number(seq.rows[0].next_seq) - 1}`;
+      } else {
+        key = await generateKey(); // pre-014 database — legacy random keys
+      }
       const { rows } = await client.query(
         `INSERT INTO tickets
            (key, title, description, category, priority, status,
             requester_name, requester_email, assignee_name, assignee_email,
             department, shop, platforms, labels, due_date, problem_category,
             issue_type, parent_id, current_result, expected_result, jira_sync_state,
-            request_type_id, form_values)
+            request_type_id, form_values, board_id)
          VALUES ($1,$2,$3,$4,$5,'To Do',$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,
-                 $14,$15,$16,$17,$18,$19,'local-only',$20,$21::jsonb)
+                 $14,$15,$16,$17,$18,$19,'local-only',$20,$21::jsonb,$22)
          RETURNING *`,
         [
           key,
@@ -472,6 +540,7 @@ router.post('/', async (req, res, next) => {
           d.expectedResult || null,
           requestType?.id || null,
           JSON.stringify(d.formValues || {}),
+          boardId,
         ]
       );
       let t = rows[0];
@@ -744,11 +813,22 @@ router.patch('/:id', async (req, res, next) => {
       }
     }
 
-    // Declaring a major incident broadcasts to all staff (bell + persisted).
+    // Declaring a major incident broadcasts to global staff plus the members
+    // of the ticket's board (space membership and per-account board grants).
     if (d.majorIncident === true && !ticket.major_incident) {
       const staff = await query(
-        `SELECT u.email FROM users u JOIN roles r ON r.id = u.role_id
-         WHERE u.active AND r.capabilities @> '["tickets.view_all"]'::jsonb`
+        `SELECT DISTINCT u.email FROM users u JOIN roles r ON r.id = u.role_id
+         WHERE u.active AND (
+           r.capabilities @> '["tickets.view_all"]'::jsonb
+           OR u.id IN (
+             SELECT sm.user_id FROM space_members sm
+               JOIN boards b ON b.space_id = sm.space_id
+              WHERE b.id = $1
+             UNION
+             SELECT bm.user_id FROM board_members bm WHERE bm.board_id = $1
+           )
+         )`,
+        [ticket.board_id]
       );
       for (const s of staff.rows) {
         await query(
@@ -806,8 +886,9 @@ router.post('/:id/incident-updates', async (req, res, next) => {
     const schema = z.object({ body: z.string().min(1).max(8000) }).strict();
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
-    const { ticket, notFound } = await loadVisible(req, req.params.id);
+    const { ticket, notFound, forbidden } = await loadVisible(req, req.params.id);
     if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
     const { rows } = await query(
       `INSERT INTO incident_updates (ticket_id, author, body, status_at_post)
        VALUES ($1,$2,$3,$4) RETURNING *`,
@@ -837,8 +918,9 @@ router.post('/:id/postmortem', async (req, res, next) => {
   try {
     if (!can(req.user, 'incidents.manage'))
       return res.status(403).json({ error: 'Insufficient permissions to manage incidents.' });
-    const { ticket, notFound } = await loadVisible(req, req.params.id);
+    const { ticket, notFound, forbidden } = await loadVisible(req, req.params.id);
     if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
     if (ticket.postmortem_doc_id) {
       return res.status(409).json({ error: 'A postmortem already exists for this incident.' });
     }
@@ -919,8 +1001,9 @@ router.post('/:id/assign', async (req, res, next) => {
       .strict();
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
-    const { ticket, notFound } = await loadVisible(req, req.params.id);
+    const { ticket, notFound, forbidden } = await loadVisible(req, req.params.id);
     if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
 
     const hadAssignee = Boolean(ticket.assignee_email);
     const movingSomeoneElse = hadAssignee && ticket.assignee_email !== req.user.email;
@@ -992,6 +1075,11 @@ router.delete('/:id', async (req, res, next) => {
   try {
     if (!can(req.user, 'tickets.delete'))
       return res.status(403).json({ error: 'Insufficient permissions.' });
+    // The capability alone is not enough — the ticket must also be visible to
+    // the caller (board membership / own ticket). Closes a cross-board hole.
+    const vis = await loadVisible(req, req.params.id);
+    if (vis.notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (vis.forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
     const { rows } = await query('DELETE FROM tickets WHERE id=$1 RETURNING key', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Ticket not found.' });
     await writeAudit(req.user.email, 'ticket.delete', rows[0].key);

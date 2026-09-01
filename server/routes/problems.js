@@ -10,7 +10,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db.js';
 import { requireAuth, requireCapability, writeAudit } from '../auth.js';
-import { generateKey } from './tickets.js';
+import { generateKey, defaultBoardId } from './tickets.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -140,12 +140,22 @@ router.post('/', requireCapability('problems.manage'), async (req, res, next) =>
       return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
     const d = parsed.data;
     const key = await generateKey('PRB');
+    const boardId = await defaultBoardId(); // problem board routing is future work
     const problem = await withTransaction(async client => {
       const { rows } = await client.query(
         `INSERT INTO tickets (key, title, description, category, priority, status,
-           requester_name, requester_email, record_type, issue_type, jira_sync_state)
-         VALUES ($1,$2,$3,$4,$5,'To Do',$6,$7,'problem','Task','local-only') RETURNING *`,
-        [key, d.title, d.description, d.category || null, d.priority, req.user.name, req.user.email]
+           requester_name, requester_email, record_type, issue_type, jira_sync_state, board_id)
+         VALUES ($1,$2,$3,$4,$5,'To Do',$6,$7,'problem','Task','local-only',$8) RETURNING *`,
+        [
+          key,
+          d.title,
+          d.description,
+          d.category || null,
+          d.priority,
+          req.user.name,
+          req.user.email,
+          boardId,
+        ]
       );
       const p = rows[0];
       await client.query('INSERT INTO problem_details (ticket_id, impact) VALUES ($1,$2)', [
@@ -181,8 +191,8 @@ router.post(
       const problem = await withTransaction(async client => {
         const { rows } = await client.query(
           `INSERT INTO tickets (key, title, description, category, priority, status,
-           requester_name, requester_email, record_type, issue_type, jira_sync_state)
-         VALUES ($1,$2,$3,$4,$5,'To Do',$6,$7,'problem','Task','local-only') RETURNING *`,
+           requester_name, requester_email, record_type, issue_type, jira_sync_state, board_id)
+         VALUES ($1,$2,$3,$4,$5,'To Do',$6,$7,'problem','Task','local-only',$8) RETURNING *`,
           [
             key,
             `Root cause: ${s.title}`.slice(0, 300),
@@ -191,6 +201,7 @@ router.post(
             s.priority,
             req.user.name,
             req.user.email,
+            s.board_id, // inherit the source ticket's board
           ]
         );
         const p = rows[0];

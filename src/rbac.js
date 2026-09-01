@@ -185,6 +185,13 @@ export const CAPABILITIES = Object.freeze([
     label: 'View reports',
     description: 'Open the KPI dashboard (trends, SLA compliance, CSAT, change success).',
   },
+  {
+    id: 'spaces.manage',
+    group: 'Admin',
+    label: 'Manage spaces & boards',
+    description:
+      'Create spaces and boards, set board keys, and manage space/board memberships portal-wide.',
+  },
 
   // Problems & Changes
   {
@@ -304,6 +311,7 @@ export const SEED_ROLES = Object.freeze([
       'sla.manage',
       'approvals.override',
       'reports.view',
+      'spaces.manage',
       'assets.view',
       'assets.manage',
       'system.settings_edit',
@@ -389,4 +397,4 @@ export const DEFAULT_ROLE_ID = 'role_user';
 export const SEED_EMAIL_REWRITE = Object.freeze({});
 
 // Bump this when the migration changes shape so future boots re-run it.
-export const RBAC_SCHEMA_VERSION = 2;
+export const RBAC_SCHEMA_VERSION = 3;

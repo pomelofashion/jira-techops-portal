@@ -46,6 +46,7 @@ import problemsRouter from './routes/problems.js';
 import changesRouter from './routes/changes.js';
 import csatRouter from './routes/csat.js';
 import reportsRouter from './routes/reports.js';
+import spacesRouter from './routes/spaces.js';
 import { startSlaSweeper } from './lib/slaSweeper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -145,6 +146,7 @@ if (dbEnabled) {
   app.use('/api/sla', slaRouter);
   app.use('/api/notifications', notificationsRouter);
   app.use('/api/approvals', approvalsRouter);
+  app.use('/api/spaces', spacesRouter);
   app.use('/api/assets', assetsRouter);
   app.use('/api/problems', problemsRouter);
   app.use('/api/changes', changesRouter);

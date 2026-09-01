@@ -59,6 +59,39 @@ export async function loadUserWithRole(userId) {
   );
   const u = rows[0];
   if (!u || !u.active) return null;
+
+  // Space + board grants (migration 014). Space membership covers every
+  // unarchived board in the space; board_members grants a single board to an
+  // account — the board-level role wins over the space-level role for that
+  // board. Tables may not exist on a not-yet-migrated DB, so fail soft.
+  const spaceRoles = {}; // spaceId → 'admin' | 'member' | 'viewer'
+  const boardRoles = {}; // boardId → effective role
+  try {
+    const [sm, bm] = await Promise.all([
+      query(
+        `SELECT sm.space_id, sm.role, b.id AS board_id
+           FROM space_members sm
+           LEFT JOIN boards b ON b.space_id = sm.space_id AND b.archived = FALSE
+          WHERE sm.user_id = $1`,
+        [userId]
+      ),
+      query(
+        `SELECT bm.board_id, bm.role
+           FROM board_members bm
+           JOIN boards b ON b.id = bm.board_id AND b.archived = FALSE
+          WHERE bm.user_id = $1`,
+        [userId]
+      ),
+    ]);
+    for (const r of sm.rows) {
+      spaceRoles[r.space_id] = r.role;
+      if (r.board_id) boardRoles[r.board_id] = r.role;
+    }
+    for (const r of bm.rows) boardRoles[r.board_id] = r.role; // board grant wins
+  } catch {
+    /* pre-014 database — no membership tables yet */
+  }
+
   return {
     id: u.id,
     name: u.name,
@@ -73,6 +106,9 @@ export async function loadUserWithRole(userId) {
       color: u.role_color,
       capabilities: u.role_capabilities, // JSONB array
     },
+    spaceRoles,
+    boardRoles,
+    boardIds: Object.keys(boardRoles),
   };
 }
 

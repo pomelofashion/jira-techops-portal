@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { query } from '../db.js';
 import { requireAuth, writeAudit } from '../auth.js';
 import { sendApprovalEmail, sendApprovalDecidedEmail } from '../email.js';
+import { canSeeBoard } from '../lib/spacesAccess.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -87,6 +88,14 @@ router.get('/mine', async (req, res, next) => {
 
 router.get('/subject/:type/:id', async (req, res, next) => {
   try {
+    // Visibility: global staff, the subject ticket's requester/assignee,
+    // members of its board, or an approver on the thread. This route used to
+    // leak ticket titles to any authenticated user who knew a uuid.
+    const t = await query(
+      'SELECT board_id, requester_email, assignee_email FROM tickets WHERE id=$1',
+      [req.params.id]
+    );
+    if (!t.rows.length) return res.json({ approvals: [] });
     const { rows } = await query(
       `SELECT a.*, t.key AS ticket_key, t.title AS ticket_title
        FROM approvals a JOIN tickets t ON t.id = a.subject_id
@@ -94,6 +103,14 @@ router.get('/subject/:type/:id', async (req, res, next) => {
        ORDER BY a.created_at ASC`,
       [req.params.type, req.params.id]
     );
+    const tk = t.rows[0];
+    const visible =
+      can(req.user, 'tickets.view_all') ||
+      tk.requester_email === req.user.email ||
+      tk.assignee_email === req.user.email ||
+      canSeeBoard(req.user, tk.board_id) ||
+      rows.some(a => a.approver_email === req.user.email);
+    if (!visible) return res.status(403).json({ error: 'Insufficient permissions.' });
     res.json({ approvals: rows.map(serialize) });
   } catch (err) {
     next(err);

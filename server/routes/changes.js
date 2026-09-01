@@ -12,7 +12,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db.js';
 import { requireAuth, requireCapability, writeAudit } from '../auth.js';
-import { generateKey } from './tickets.js';
+import { generateKey, defaultBoardId } from './tickets.js';
 import { createApproval } from './approvals.js';
 
 const router = Router();
@@ -167,12 +167,13 @@ router.post('/', requireCapability('changes.manage'), async (req, res, next) => 
     const windowProblem = windowValid(d);
     if (windowProblem) return res.status(400).json({ error: windowProblem });
     const key = await generateKey('CHG');
+    const boardId = await defaultBoardId(); // change board routing is future work
     const change = await withTransaction(async client => {
       const { rows } = await client.query(
         `INSERT INTO tickets (key, title, description, priority, status,
-           requester_name, requester_email, record_type, issue_type, jira_sync_state)
-         VALUES ($1,$2,$3,$4,'To Do',$5,$6,'change','Task','local-only') RETURNING *`,
-        [key, d.title, d.description, d.priority, req.user.name, req.user.email]
+           requester_name, requester_email, record_type, issue_type, jira_sync_state, board_id)
+         VALUES ($1,$2,$3,$4,'To Do',$5,$6,'change','Task','local-only',$7) RETURNING *`,
+        [key, d.title, d.description, d.priority, req.user.name, req.user.email, boardId]
       );
       const c = rows[0];
       // Standard changes are pre-authorized by definition.
