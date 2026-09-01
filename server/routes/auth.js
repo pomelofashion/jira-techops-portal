@@ -258,7 +258,10 @@ router.post(
       if (!rows.length) return res.status(400).json({ error: 'Invalid or expired link.' });
       const hash = await bcrypt.hash(req.valid.password, 12);
       await withTransaction(async client => {
-        await client.query('UPDATE users SET password_hash=$1 WHERE id=$2', [
+        // Completing a reset proves mailbox ownership — the same trust basis
+        // as the verify link — so it also unsticks never-verified accounts
+        // whose original verification token expired.
+        await client.query('UPDATE users SET password_hash=$1, email_verified=TRUE WHERE id=$2', [
           hash,
           rows[0].user_id,
         ]);
