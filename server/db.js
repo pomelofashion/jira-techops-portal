@@ -14,7 +14,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { config as dotenvConfig } from 'dotenv';
 
-// Load config.json (bundled by Vercel), then .env.local for local dev overrides.
+// Load the env files (.env.local then .env) via the central loader.
 import './loadConfig.js';
 const __db_dirname = dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: resolve(__db_dirname, '..', '.env.local') });
