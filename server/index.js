@@ -51,7 +51,7 @@ import { startSlaSweeper } from './lib/slaSweeper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: resolve(__dirname, '..', '.env.local') });
-// config.json is already loaded by db.js (imported above) via loadConfig.js
+// Env files (.env.local then .env) are loaded by db.js via loadConfig.js
 
 // ─── Structured logging + Sentry init ─────────────────────────────────────────
 // Emits one-line JSON to stdout. Sentry capture is enabled when SENTRY_DSN is
