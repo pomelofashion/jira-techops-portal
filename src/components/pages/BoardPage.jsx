@@ -36,18 +36,23 @@ export default function BoardPage({
   onOpenTicket,
   onQuickCreate,
   onOpenFullForm,
+  boardKey,
 }) {
+  // Filters persist per board so each team keeps its own saved view. The host
+  // remounts this component (key=board) on board switch, so the lazy useState
+  // initializer re-reads the right store entry.
+  const filtersKey = boardKey ? `${FILTERS_KEY}:${boardKey}` : FILTERS_KEY;
   const [filters, setFiltersState] = useState(() => ({
     ...DEFAULT_FILTERS,
-    ...loadStore(FILTERS_KEY, {}),
-    quick: { ...DEFAULT_FILTERS.quick, ...(loadStore(FILTERS_KEY, {}).quick || {}) },
+    ...loadStore(filtersKey, {}),
+    quick: { ...DEFAULT_FILTERS.quick, ...(loadStore(filtersKey, {}).quick || {}) },
   }));
   const [showCreate, setShowCreate] = useState(false);
 
   const setFilters = updater => {
     setFiltersState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      saveStore(FILTERS_KEY, next);
+      saveStore(filtersKey, next);
       return next;
     });
   };

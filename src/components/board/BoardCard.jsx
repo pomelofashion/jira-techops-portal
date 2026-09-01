@@ -77,12 +77,18 @@ export default function BoardCard({
   onDragStart,
   onDragEnd,
   onOpen,
+  boardKey,
 }) {
   const PriorityIcon = PRIORITY_ICONS[ticket.priority] || Equal;
   const TypeIcon = ISSUE_TYPE_ICONS[ticket.issueType] || ISSUE_TYPE_ICONS.Task;
-  // Narrow columns show the key without the constant TKT- prefix — the digits
-  // are the identity; the full key stays one hover away.
-  const displayKey = compact ? ticket.id.replace(/^TKT-/, '') : ticket.id;
+  // Narrow columns drop the board-key prefix — on a single-board view the
+  // number is the identity; the full key stays one hover away. Legacy keys
+  // adopted from before boards existed fall back to stripping TKT-.
+  const displayKey = compact
+    ? boardKey && ticket.id.startsWith(`${boardKey}-`)
+      ? ticket.id.slice(boardKey.length + 1)
+      : ticket.id.replace(/^TKT-/, '')
+    : ticket.id;
   return (
     <div
       className="pomelo-board-card"

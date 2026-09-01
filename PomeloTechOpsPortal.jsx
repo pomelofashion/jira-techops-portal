@@ -29,6 +29,7 @@ import * as authApi from './src/api/authApi.js';
 import * as ticketsApi from './src/api/ticketsApi.js';
 import * as usersApi from './src/api/usersApi.js';
 import * as rolesApi from './src/api/rolesApi.js';
+import * as spacesApi from './src/api/spacesApi.js';
 import { loadStore, saveStore, clearStore } from './src/lib/store.js';
 import {
   MAX_ATTEMPTS,
@@ -68,6 +69,7 @@ import { S } from './src/lib/styles.js';
 import PriorityGuidePage from './src/components/pages/PriorityGuidePage.jsx';
 import BoardPage from './src/components/pages/BoardPage.jsx';
 import Sidebar from './src/components/Sidebar.jsx';
+import SpacesAdminPage from './src/components/spaces/SpacesAdminPage.jsx';
 import SLAPage from './src/components/pages/SLAPage.jsx';
 import FilePreviewCard, { fileToAttachment } from './src/components/FilePreviewCard.jsx';
 import {
@@ -631,6 +633,36 @@ const mirror = promise => {
   });
 };
 
+// ─── Spaces / boards store (hydrated from /api/spaces) ────────────────────────
+// The server returns only the spaces + boards the session can see, each with
+// the caller's effective role (myRole). Same pub/sub shape as the ticket store.
+let SPACES = [];
+let SPACES_LOADED = false; // distinguishes "no access" from "not fetched yet"
+let _spacesVersion = 0;
+const _spacesListeners = new Set();
+const bumpSpaces = () => {
+  _spacesVersion++;
+  _spacesListeners.forEach(fn => fn(_spacesVersion));
+};
+const subscribeSpaces = fn => {
+  _spacesListeners.add(fn);
+  return () => _spacesListeners.delete(fn);
+};
+const setSpaces = spaces => {
+  SPACES = Array.isArray(spaces) ? spaces : [];
+  SPACES_LOADED = true;
+  bumpSpaces();
+};
+const listSpacesLocal = () => SPACES;
+const spacesLoaded = () => SPACES_LOADED;
+const allBoards = () => SPACES.flatMap(s => s.boards || []);
+const boardByKey = key => allBoards().find(b => b.key === key) || null;
+const reloadSpaces = async () => {
+  if (!API_ENABLED) return;
+  const res = await spacesApi.listSpaces();
+  if (res.data?.spaces) setSpaces(res.data.spaces);
+};
+
 // Server ticket → UI ticket. The human key drives display and local lookups
 // (mock tickets use it as their id); the row uuid is kept for API calls.
 const ticketFromApi = t => ({
@@ -658,6 +690,7 @@ const ticketFromApi = t => ({
   parentId: t.parentId || null,
   currentResult: t.currentResult || null,
   expectedResult: t.expectedResult || null,
+  boardId: t.boardId || null,
   jiraKey: t.jiraKey,
   jiraSyncState: t.jiraSyncState,
   jiraSyncedAt: t.jiraSyncedAt,
@@ -764,14 +797,17 @@ const pushJiraTransition = async (ticket, newStatus) => {
 // Poll Jira for changes since `lastSyncAt`. Reconciles local tickets whose
 // jiraKey matches a returned issue. Issues not yet known locally are ignored
 // for now (we don't auto-create stubs). Returns the latest fetchedAt.
-let LAST_JIRA_POLL_AT = null;
+// One cursor per Jira project — boards can mirror different projects
+// (boards.jira_project_key), so their polls track independently.
+const LAST_JIRA_POLL_AT = new Map();
 const pollJira = async (project = 'PESD1') => {
   try {
-    const since = LAST_JIRA_POLL_AT ? `&since=${encodeURIComponent(LAST_JIRA_POLL_AT)}` : '';
+    const last = LAST_JIRA_POLL_AT.get(project);
+    const since = last ? `&since=${encodeURIComponent(last)}` : '';
     const res = await fetch(`/api/v1/jira/poll?project=${encodeURIComponent(project)}${since}`);
     if (!res.ok) return null;
     const data = await res.json();
-    LAST_JIRA_POLL_AT = data.fetchedAt || LAST_JIRA_POLL_AT;
+    if (data.fetchedAt) LAST_JIRA_POLL_AT.set(project, data.fetchedAt);
     if (data.unavailable || !Array.isArray(data.issues) || data.issues.length === 0) return data;
 
     // Reconcile: update any local ticket whose jiraKey matches; for Jira-side
@@ -838,6 +874,18 @@ const pollJira = async (project = 'PESD1') => {
   } catch {
     return null;
   }
+};
+
+// Poll every Jira project mirrored by a visible board; falls back to PESD1
+// when the spaces store hasn't hydrated or no board declares a project.
+const pollAllJiraProjects = () => {
+  const keys = new Set(
+    allBoards()
+      .map(b => b.jiraProjectKey)
+      .filter(Boolean)
+  );
+  if (!keys.size) keys.add('PESD1');
+  keys.forEach(k => pollJira(k));
 };
 
 // ─── Issue types + Components (live, with fallback) ──────────────────────────
@@ -2012,12 +2060,17 @@ const hydrateFromBackend = async () => {
     ROLES_REGISTRY = r.data.roles;
     bumpRoles();
   }
-  const [u, t] = await Promise.all([usersApi.listUsers(), ticketsApi.listTickets({ limit: 200 })]);
+  const [u, t, sp] = await Promise.all([
+    usersApi.listUsers(),
+    ticketsApi.listTickets({ limit: 200 }),
+    spacesApi.listSpaces(),
+  ]);
   if (u.data?.users) {
     MOCK_USERS = u.data.users.map(userFromApi);
     bumpUsers();
   }
   if (t.data?.tickets) updateTickets(t.data.tickets.map(ticketFromApi));
+  if (sp.data?.spaces) setSpaces(sp.data.spaces);
 };
 
 const updateUser = (id, updates) => {
@@ -7752,6 +7805,16 @@ function FieldHint({ text }) {
 }
 
 function SubmitPage({ setSection, showToast, currentUser }) {
+  const canGlobal = useCan();
+  // Board routing: members choose which team's board receives the ticket.
+  // Hidden when there's at most one option; empty selection lets the server
+  // route (request-type default → PESD1).
+  const [, setSpacesTick] = useState(0);
+  useEffect(() => subscribeSpaces(setSpacesTick), []);
+  const boardOptions = allBoards().filter(
+    b => canGlobal('tickets.view_all') || b.myRole === 'admin' || b.myRole === 'member'
+  );
+  const [boardSel, setBoardSel] = useState('');
   const workflow = useJiraWorkflow();
   const issueTypes = useIssueTypes();
   const components = useComponents();
@@ -7947,6 +8010,7 @@ function SubmitPage({ setSection, showToast, currentUser }) {
     if (form.files.length > 0) {
       ticket.attachments = await Promise.all(form.files.slice(0, 10).map(fileToAttachment));
     }
+    if (boardSel) ticket.boardId = boardSel;
     addTicket(ticket);
     if (API_ENABLED) {
       // Persist to the backend; adopt the server's identity (uuid + canonical
@@ -7955,6 +8019,7 @@ function SubmitPage({ setSection, showToast, currentUser }) {
         .createTicket({
           title: ticket.title,
           description: ticket.description || '',
+          ...(boardSel ? { boardId: boardSel } : {}),
           ...(ticket.category ? { category: ticket.category } : {}),
           priority: ticket.priority || 'Medium',
           ...(ticket.department ? { department: ticket.department } : {}),
@@ -8066,6 +8131,27 @@ function SubmitPage({ setSection, showToast, currentUser }) {
             />
             <FieldHint text="This tells the tech team exactly what a successful resolution looks like." />
           </div>
+
+          {/* Board (team routing) — only when the user can pick between boards */}
+          {API_ENABLED && boardOptions.length > 1 && (
+            <div>
+              <label style={S.label}>Board</label>
+              <select
+                value={boardSel}
+                onChange={e => setBoardSel(e.target.value)}
+                style={S.select}
+                aria-label="Board"
+              >
+                <option value="">Auto (request routing)</option>
+                {boardOptions.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.key === b.name ? b.key : `${b.key} · ${b.name}`}
+                  </option>
+                ))}
+              </select>
+              <FieldHint text="Which team's board should handle this ticket. Leave on Auto unless you know the owning team." />
+            </div>
+          )}
 
           {/* Platform Impacted */}
           <div>
@@ -13407,10 +13493,26 @@ const tooltipContentStyle = {
 // ticket subscription, drag permissions, quick create, and the full
 // TicketDetail view when a card is opened. All mutations use the same
 // updateTickets + mirror + pushJiraTransition path as every other page.
-function BoardSectionHost({ currentUser, setSection }) {
+function BoardSectionHost({ currentUser, setSection, activeBoard }) {
   const can = useCan();
   const [, _setTicketsVersion] = useState(0);
   useEffect(() => subscribeTickets(_setTicketsVersion), []);
+
+  // Board switch: pull that board's tickets from the server (boot hydration is
+  // a global 200-row snapshot, which multi-board portfolios outgrow) and merge
+  // into the store by uuid so other pages keep their rows.
+  useEffect(() => {
+    if (!API_ENABLED || !activeBoard?.id) return;
+    ticketsApi.listTickets({ boardId: activeBoard.id, limit: 200 }).then(res => {
+      if (!res.data?.tickets) return;
+      const incoming = res.data.tickets.map(ticketFromApi);
+      updateTickets(ts => {
+        const byId = new Map(ts.map(t => [t.uuid || t.id, t]));
+        for (const t of incoming) byId.set(t.uuid || t.id, t);
+        return Array.from(byId.values());
+      });
+    });
+  }, [activeBoard?.id]);
   const { addNotification } = useNotifications();
   const [openId, setOpenId] = useState(null);
   // Card click shows the quick-preview popup first (like Jira); clicking the
@@ -13455,15 +13557,26 @@ function BoardSectionHost({ currentUser, setSection }) {
     );
   };
 
+  // Board members (space or account-level grant, non-viewer) can work cards on
+  // their own board even without global status capabilities — the server
+  // enforces the same rule in the PATCH status gate.
+  const isBoardWorker = activeBoard
+    ? activeBoard.myRole === 'admin' || activeBoard.myRole === 'member'
+    : false;
+
   const canDrag = t =>
     can('tickets.status_change_any') ||
     (can('tickets.status_change_own') &&
       !!currentUser?.email &&
-      t.assigneeEmail === currentUser.email);
+      t.assigneeEmail === currentUser.email) ||
+    isBoardWorker;
 
   const quickCreate = payload => {
     const today = new Date().toISOString().slice(0, 10);
-    const id = `TKT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+    // Optimistic placeholder id; swapped for the server-minted KEY-n on ack.
+    const id = activeBoard
+      ? `${activeBoard.key}-tmp${String(Math.floor(Math.random() * 9000) + 1000)}`
+      : `TKT-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
     const ticket = {
       id,
       title: payload.title,
@@ -13493,6 +13606,7 @@ function BoardSectionHost({ currentUser, setSection }) {
       messages: [],
       pullRequests: [],
       jiraSyncState: 'local-only',
+      boardId: activeBoard?.id || null,
     };
     addTicket(ticket);
     if (API_ENABLED) {
@@ -13504,6 +13618,7 @@ function BoardSectionHost({ currentUser, setSection }) {
           platforms: [],
           labels: ticket.labels,
           issueType: ticket.issueType,
+          ...(activeBoard ? { boardId: activeBoard.id } : {}),
           ...(ticket.dueDate ? { dueDate: ticket.dueDate } : {}),
           ...(ticket.assigneeEmail
             ? { assigneeEmail: ticket.assigneeEmail, assigneeName: ticket.assignee }
@@ -13550,10 +13665,16 @@ function BoardSectionHost({ currentUser, setSection }) {
   return (
     <>
       <BoardPage
-        tickets={MOCK_TICKETS.slice()}
+        key={activeBoard?.key || 'default'}
+        tickets={
+          activeBoard
+            ? MOCK_TICKETS.filter(t => t.boardId === activeBoard.id)
+            : MOCK_TICKETS.slice()
+        }
+        boardKey={activeBoard?.key || null}
         currentUser={currentUser}
         canDrag={canDrag}
-        canCreate={can('tickets.view_all')}
+        canCreate={can('tickets.view_all') || isBoardWorker}
         assignableUsers={listAssignableUsers().map(u => u.name)}
         onMoveTicket={moveTicket}
         onOpenTicket={t => setPreviewId(t.id)}
@@ -13815,6 +13936,7 @@ const VALID_SECTIONS = new Set([
   'chatlogs',
   'board',
   'catalog-admin',
+  'spaces-admin',
   'approvals',
   'assets',
   'incidents',
@@ -13824,7 +13946,16 @@ const VALID_SECTIONS = new Set([
 ]);
 const sectionFromHash = () => {
   const h = window.location.hash.replace('#', '');
-  return VALID_SECTIONS.has(h) ? h : 'home';
+  const [head] = h.split('/');
+  return VALID_SECTIONS.has(head) ? head : 'home';
+};
+// Board deep links carry the board key as a second segment: #board/PESD1.
+// Any other section stays a flat id; unknown keys resolve later against the
+// hydrated spaces store (never a broken page).
+const boardKeyFromHash = () => {
+  const h = window.location.hash.replace('#', '');
+  const [head, key] = h.split('/');
+  return head === 'board' && key ? decodeURIComponent(key) : null;
 };
 
 const ADMIN_TOOLS = [
@@ -13848,6 +13979,13 @@ const ADMIN_TOOLS = [
     label: 'Service Catalog',
     hint: 'Request types & forms',
     cap: 'catalog.manage',
+  },
+  {
+    id: 'spaces-admin',
+    Icon: ClipboardList,
+    label: 'Spaces & Boards',
+    hint: 'Team spaces, boards, membership',
+    cap: 'spaces.manage',
   },
   {
     id: 'reports',
@@ -14105,19 +14243,26 @@ function AppContent() {
   // The active section lives in the URL hash so the browser's Back/Forward
   // buttons walk in-app navigation instead of leaving the app.
   const [section, setSection] = useState(sectionFromHash);
+  const [activeBoardKey, setActiveBoardKey] = useState(boardKeyFromHash);
   const historySyncedRef = useRef(false);
+  // Re-render when the spaces store hydrates (board nav, sidebar tree, gating).
+  const [spacesVersion, setSpacesVersion] = useState(0);
+  useEffect(() => subscribeSpaces(setSpacesVersion), []);
 
   // Section → history: every in-app navigation becomes a history entry. The
   // first sync uses replaceState so a fresh load doesn't add a dead entry.
   useEffect(() => {
-    const target = '#' + section;
+    const target =
+      section === 'board' && activeBoardKey
+        ? `#board/${encodeURIComponent(activeBoardKey)}`
+        : '#' + section;
     if (window.location.hash === target) return;
     if (historySyncedRef.current) {
       window.history.pushState({ section }, '', target);
     } else {
       window.history.replaceState({ section }, '', target);
     }
-  }, [section]);
+  }, [section, activeBoardKey]);
   useEffect(() => {
     historySyncedRef.current = true;
   }, []);
@@ -14125,10 +14270,28 @@ function AppContent() {
   // History → section: Back/Forward restore whatever the hash says. The sync
   // effect above sees hash === target afterwards, so no push-loop.
   useEffect(() => {
-    const onPop = () => setSection(sectionFromHash());
+    const onPop = () => {
+      setSection(sectionFromHash());
+      setActiveBoardKey(boardKeyFromHash());
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
+  // Resolve the active board once spaces hydrate: keep a valid deep-linked
+  // key, else the last-used board (localStorage), else the first visible one.
+  // Re-runs whenever the store changes (e.g. a board is archived away).
+  useEffect(() => {
+    if (section !== 'board' || !spacesLoaded()) return;
+    const boards = allBoards();
+    if (activeBoardKey && boards.some(b => b.key === activeBoardKey)) {
+      saveStore('activeBoardKey', activeBoardKey);
+      return;
+    }
+    const remembered = loadStore('activeBoardKey', null);
+    const next = boards.find(b => b.key === remembered) || boards[0] || null;
+    setActiveBoardKey(next ? next.key : null);
+  }, [section, activeBoardKey, spacesVersion]);
+
   const [toast, setToast] = useState(null);
   const [role, setRole] = useState('user');
   const [profileOpen, setProfileOpen] = useState(false);
@@ -14220,8 +14383,8 @@ function AppContent() {
   // every 60s; harmless when Jira is unreachable (BFF returns unavailable:true).
   useEffect(() => {
     if (!isAuthenticated) return;
-    pollJira('PESD1');
-    const id = setInterval(() => pollJira('PESD1'), 60_000);
+    pollAllJiraProjects();
+    const id = setInterval(() => pollAllJiraProjects(), 60_000);
     return () => clearInterval(id);
   }, [isAuthenticated]);
 
@@ -14301,7 +14464,7 @@ function AppContent() {
     if (API_ENABLED) {
       items.push({ id: 'approvals', label: 'Approvals', icon: Check });
     }
-    if (can('tickets.view_all')) {
+    if (can('tickets.view_all') || allBoards().length > 0) {
       items.push({ id: 'board', label: 'Board', icon: ClipboardList });
     }
     if (can('tickets.view_assigned')) {
@@ -14310,7 +14473,7 @@ function AppContent() {
     // Assets / Incidents / Problems / Changes live in the Operations dropdown
     // (OPS_ITEMS) — grouped like Resources to keep the tab row scannable.
     return items;
-  }, [can]);
+  }, [can, spacesVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const RESOURCE_IDS = new Set(['docs', 'suggestions', 'priority', 'sla']);
 
   // Left rail groups (Board section only) — main destinations, Resources,
@@ -14318,6 +14481,17 @@ function AppContent() {
   const sidebarGroups = useMemo(() => {
     const groups = [
       { label: null, items: NAV_ITEMS.map(i => ({ id: i.id, label: i.label, Icon: i.icon })) },
+      // One group per space: its boards, deep-linkable as #board/<KEY>.
+      ...listSpacesLocal()
+        .filter(s => (s.boards || []).length > 0)
+        .map(s => ({
+          label: s.name,
+          items: s.boards.map(b => ({
+            id: `board/${b.key}`,
+            label: b.name === b.key ? b.name : `${b.key} · ${b.name}`,
+            Icon: ClipboardList,
+          })),
+        })),
       {
         label: 'Operations',
         items: API_ENABLED
@@ -14338,7 +14512,7 @@ function AppContent() {
       },
     ];
     return groups.filter(g => g.items.length > 0);
-  }, [NAV_ITEMS, can]);
+  }, [NAV_ITEMS, can, spacesVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-section capability requirements. A section without an entry is
   // public. When the effective view's `can` flips below the required
@@ -14347,13 +14521,15 @@ function AppContent() {
   const SECTION_CAPS = useMemo(
     () => ({
       admin: 'admin.kanban_view',
-      board: 'tickets.view_all',
+      // 'board' has no static entry: access = tickets.view_all OR membership
+      // in at least one board; handled in the bounce effect below.
       users: 'users.edit',
       roles: 'roles.edit',
       audit: 'audit.view',
       chatlogs: 'chatlogs.view',
       devportal: 'tickets.view_assigned',
       'catalog-admin': 'catalog.manage',
+      'spaces-admin': 'spaces.manage',
       assets: 'assets.view',
       incidents: 'tickets.view_all',
       problems: 'tickets.view_all',
@@ -14365,7 +14541,16 @@ function AppContent() {
   useEffect(() => {
     const required = SECTION_CAPS[section];
     if (required && !can(required)) setSection('home');
-  }, [section, can, SECTION_CAPS]);
+    // Board access = global staff OR membership in ≥1 board. Bounce only after
+    // the spaces store has hydrated so deep links survive the loading race.
+    if (
+      section === 'board' &&
+      !can('tickets.view_all') &&
+      spacesLoaded() &&
+      allBoards().length === 0
+    )
+      setSection('home');
+  }, [section, can, SECTION_CAPS, spacesVersion]);
 
   // Re-seed notifications when the view flips so the impersonated/downgraded
   // view shows that user's notification history rather than the real session's.
@@ -14450,7 +14635,13 @@ function AppContent() {
         page = <MyTicketsPage role={effectiveRole} currentUser={effectiveUser} />;
         break;
       case 'board':
-        page = <BoardSectionHost currentUser={effectiveUser} setSection={setSection} />;
+        page = (
+          <BoardSectionHost
+            currentUser={effectiveUser}
+            setSection={setSection}
+            activeBoard={activeBoardKey ? boardByKey(activeBoardKey) : null}
+          />
+        );
         break;
       case 'devportal':
         page = can('tickets.view_assigned') ? (
@@ -14481,6 +14672,16 @@ function AppContent() {
         page = can('catalog.manage') ? (
           <CatalogAdminPage
             onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
+          />
+        ) : (
+          <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
+        );
+        break;
+      case 'spaces-admin':
+        page = can('spaces.manage') ? (
+          <SpacesAdminPage
+            onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
+            onSpacesChanged={reloadSpaces}
           />
         ) : (
           <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
@@ -14855,7 +15056,18 @@ function AppContent() {
           {/* The nav rail is a Board-workspace affordance (like Jira's project
               sidebar) — every other section navigates via the top bar. */}
           {section === 'board' && (
-            <Sidebar groups={sidebarGroups} active={section} onNavigate={setSection} />
+            <Sidebar
+              groups={sidebarGroups}
+              active={activeBoardKey ? `board/${activeBoardKey}` : section}
+              onNavigate={id => {
+                if (id.startsWith('board/')) {
+                  setActiveBoardKey(id.slice('board/'.length));
+                  setSection('board');
+                } else {
+                  setSection(id);
+                }
+              }}
+            />
           )}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
             <main

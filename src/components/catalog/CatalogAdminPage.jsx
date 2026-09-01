@@ -14,6 +14,7 @@ import {
   deleteRequestType,
 } from '../../api/requestTypesApi.js';
 import { catalogIcon, ICON_NAMES } from './catalogIcons.js';
+import { listSpaces } from '../../api/spacesApi.js';
 
 const FIELD_TYPES = ['text', 'textarea', 'select', 'date', 'checkbox'];
 const PRIORITIES = ['', 'Critical', 'High', 'Medium', 'Low'];
@@ -155,6 +156,13 @@ function TypeEditor({ initial, onCancel, onSaved, onToast }) {
       : emptyDraft()
   );
   const [saving, setSaving] = useState(false);
+  // Boards for type-level routing (the "Route to board" select).
+  const [boards, setBoards] = useState([]);
+  useEffect(() => {
+    listSpaces().then(r => {
+      if (r.data?.spaces) setBoards(r.data.spaces.flatMap(s => s.boards || []));
+    });
+  }, []);
   const set = patch => setDraft(d => ({ ...d, ...patch }));
   const setDefault = (k, v) =>
     setDraft(d => {
@@ -308,6 +316,21 @@ function TypeEditor({ initial, onCancel, onSaved, onToast }) {
             onChange={e => setDefault('assigneeEmail', e.target.value)}
             placeholder="Optional"
           />
+        </div>
+        <div style={{ flex: '0 1 200px' }}>
+          <label style={lbl}>Route to board</label>
+          <select
+            style={S.select}
+            value={draft.defaults.boardId || ''}
+            onChange={e => setDefault('boardId', e.target.value)}
+          >
+            <option value="">(default board)</option>
+            {boards.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.key === b.name ? b.key : `${b.key} · ${b.name}`}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div style={{ ...row, alignItems: 'center' }}>

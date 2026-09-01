@@ -621,11 +621,16 @@ router.patch('/:id', async (req, res, next) => {
     const d = parsed.data;
     const isAssignee = ticket.assignee_email === req.user.email;
 
-    // Status changes have their own capability gate.
+    // Status changes have their own capability gate. Board members (space or
+    // account-level grant, non-viewer) may work cards on their own board even
+    // without the global status capabilities — mirrors the board UI's canDrag.
     if (d.status && d.status !== ticket.status) {
+      const boardRole = req.user.boardRoles?.[ticket.board_id];
       const allowed =
         can(req.user, 'tickets.status_change_any') ||
-        (can(req.user, 'tickets.status_change_own') && isAssignee);
+        (can(req.user, 'tickets.status_change_own') && isAssignee) ||
+        boardRole === 'admin' ||
+        boardRole === 'member';
       if (!allowed) return res.status(403).json({ error: 'Cannot change status of this ticket.' });
     }
     // Editing content requires staff-level access (view_all) or being the assignee.

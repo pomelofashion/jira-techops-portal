@@ -32,6 +32,9 @@ const defaultsSchema = z
     labels: z.array(z.string().max(60)).max(20).optional(),
     assigneeEmail: z.string().email().optional(),
     category: z.string().max(80).optional(),
+    // Type-level board routing (e.g. Hardware request → the IT Support board).
+    // Validated against live boards at ticket-create time.
+    boardId: z.string().uuid().optional(),
   })
   .strict();
 
