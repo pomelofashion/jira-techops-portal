@@ -101,11 +101,15 @@ test.describe('Spaces & Boards', () => {
     await expect(page.locator('aside >> button:has-text("ITS")').first()).toBeVisible();
     await expect(page.locator('aside >> button:has-text("PESD1")')).toHaveCount(0);
 
-    // Server-side scoping: no PESD1 keys in the member's ticket list.
+    // Server-side scoping: nothing from foreign boards UNLESS this user
+    // requested it (requesters always see their own submissions).
     const res = await page.request.get('/api/tickets?limit=200');
     expect(res.status()).toBe(200);
     const body = await res.json();
-    for (const t of body.tickets) expect(t.key).not.toMatch(/^PESD1-|^TKT-/);
+    for (const t of body.tickets) {
+      if (t.requester?.email === USER.email) continue;
+      expect(t.key).not.toMatch(/^PESD1-|^TKT-/);
+    }
   });
 
   test('submit form: board picker shows for multi-board users, hides for single-board members', async ({
