@@ -23,7 +23,7 @@ export const CHANGE_TYPE_META = {
 };
 export const RISK_COLORS = { low: '#16A34A', medium: '#D97706', high: '#DC2626' };
 export const APPROVAL_STATE_META = {
-  draft: { label: 'Draft', color: '#6B7280' },
+  draft: { label: 'Draft', color: 'var(--text-muted)' },
   pending: { label: 'Approval pending', color: '#D97706' },
   approved: { label: 'Approved', color: '#16A34A' },
   rejected: { label: 'Rejected', color: '#DC2626' },

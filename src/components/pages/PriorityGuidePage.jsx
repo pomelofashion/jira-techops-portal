@@ -114,7 +114,7 @@ export default function PriorityGuidePage() {
             </div>
             <div
               style={{
-                background: '#FFF8F6',
+                background: 'rgba(234, 88, 12, 0.08)',
                 borderRadius: '6px',
                 padding: '8px 12px',
                 fontSize: '12px',

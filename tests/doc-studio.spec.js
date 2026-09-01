@@ -96,7 +96,7 @@ test.describe('Documentation Studio', () => {
     // Slash menu: type "/" on a new line and expect block options
     await ta.press('End');
     await ta.pressSequentially('\n/');
-    await expect(page.locator('button:has-text("Table")')).toBeVisible();
+    await expect(page.getByRole('button', { name: '▦ Table' })).toBeVisible();
     await expect(page.locator('button:has-text("Code block")')).toBeVisible();
     // Pick Table via keyboard
     await ta.press('Escape');

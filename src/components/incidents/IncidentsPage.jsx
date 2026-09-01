@@ -255,7 +255,7 @@ export default function IncidentsPage({ canManage, onToast, onOpenDoc }) {
       {activeMajors.length > 0 && (
         <div
           style={{
-            background: '#FEF2F2',
+            background: 'rgba(220, 38, 38, 0.10)',
             border: '1px solid #FCA5A5',
             borderRadius: '10px',
             padding: '12px 16px',

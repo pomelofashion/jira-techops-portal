@@ -35,7 +35,7 @@ export function DueChip({ dueDate, status }) {
         fontSize: '11px',
         fontWeight: 700,
         whiteSpace: 'nowrap',
-        background: overdue ? '#FEF2F2' : 'var(--bg-hover)',
+        background: overdue ? 'rgba(220, 38, 38, 0.10)' : 'var(--bg-hover)',
         color: overdue ? '#B91C1C' : 'var(--text-secondary)',
         border: overdue ? '1px solid #FECACA' : '1px solid transparent',
       }}

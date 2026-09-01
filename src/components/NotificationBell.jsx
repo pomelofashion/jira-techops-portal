@@ -6,18 +6,18 @@ import { useState, useRef, useEffect } from 'react';
 import { useNotifications, relativeTime } from '../context/NotificationContext.jsx';
 
 const TYPE_META = {
-  ticket_message: { icon: '💬', color: 'var(--accent-primary)', bg: '#FFF4EF' },
-  doc_edit: { icon: '✏️', color: 'var(--text-primary)', bg: '#EFF6FF' },
-  doc_upload: { icon: '📤', color: '#0EA5E9', bg: '#F0F9FF' },
-  status_change: { icon: '🔄', color: '#16A34A', bg: '#F0FDF4' },
-  mention: { icon: '📣', color: '#6366F1', bg: '#EEF2FF' },
+  ticket_message: { icon: '💬', color: 'var(--accent-primary)', bg: 'rgba(234, 88, 12, 0.10)' },
+  doc_edit: { icon: '✏️', color: 'var(--text-primary)', bg: 'rgba(59, 130, 246, 0.12)' },
+  doc_upload: { icon: '📤', color: '#0EA5E9', bg: 'rgba(14, 165, 233, 0.10)' },
+  status_change: { icon: '🔄', color: '#16A34A', bg: 'rgba(22, 163, 74, 0.10)' },
+  mention: { icon: '📣', color: '#6366F1', bg: 'var(--accent-soft)' },
   // Server-originated (ITSM expansion)
-  sla_approaching: { icon: '⏳', color: '#D97706', bg: '#FFFBEB' },
-  sla_breached: { icon: '🚨', color: '#DC2626', bg: '#FEF2F2' },
-  approval_request: { icon: '🖊️', color: '#6366F1', bg: '#EEF2FF' },
-  approval_decided: { icon: '✅', color: '#16A34A', bg: '#F0FDF4' },
-  major_incident: { icon: '📢', color: '#DC2626', bg: '#FEF2F2' },
-  csat_prompt: { icon: '⭐', color: '#D97706', bg: '#FFFBEB' },
+  sla_approaching: { icon: '⏳', color: '#D97706', bg: 'rgba(245, 158, 11, 0.10)' },
+  sla_breached: { icon: '🚨', color: '#DC2626', bg: 'rgba(220, 38, 38, 0.10)' },
+  approval_request: { icon: '🖊️', color: '#6366F1', bg: 'var(--accent-soft)' },
+  approval_decided: { icon: '✅', color: '#16A34A', bg: 'rgba(22, 163, 74, 0.10)' },
+  major_incident: { icon: '📢', color: '#DC2626', bg: 'rgba(220, 38, 38, 0.10)' },
+  csat_prompt: { icon: '⭐', color: '#D97706', bg: 'rgba(245, 158, 11, 0.10)' },
 };
 
 export default function NotificationBell({ onNavigate }) {
@@ -241,7 +241,9 @@ export default function NotificationBell({ onNavigate }) {
                     }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-page)')}
                     onMouseLeave={e =>
-                      (e.currentTarget.style.background = n.read ? '#fff' : '#FAFBFF')
+                      (e.currentTarget.style.background = n.read
+                        ? 'var(--bg-surface)'
+                        : 'var(--accent-soft)')
                     }
                   >
                     {/* Type icon */}

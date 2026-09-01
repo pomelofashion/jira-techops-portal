@@ -8,8 +8,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const BASE = 'http://localhost:5173';
-const ADMIN = { email: 'alex.lee@pomelo.com', password: 'Admin123!' };
-const USER = { email: 'kai.nguyen@pomelo.com', password: 'User123!' };
+const ADMIN = {
+  email: process.env.E2E_ADMIN_EMAIL || 'alex.lee@pomelo.com',
+  password: process.env.E2E_ADMIN_PASSWORD || 'Admin123!',
+};
+const USER = {
+  email: process.env.E2E_USER_EMAIL || 'kai.nguyen@pomelo.com',
+  password: process.env.E2E_USER_PASSWORD || 'User123!',
+};
 
 const OUT_DIR = path.join(process.cwd(), 'test-results', 'theme-walker');
 fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -21,7 +27,9 @@ if (!process.env.KEEP_FINDINGS) {
 
 function appendFinding(entry) {
   let arr = [];
-  try { arr = JSON.parse(fs.readFileSync(FINDINGS_FILE, 'utf-8')); } catch {}
+  try {
+    arr = JSON.parse(fs.readFileSync(FINDINGS_FILE, 'utf-8'));
+  } catch {}
   arr.push(entry);
   fs.writeFileSync(FINDINGS_FILE, JSON.stringify(arr, null, 2));
 }
@@ -45,7 +53,9 @@ async function freshLogin(page, { email, password }) {
 async function setTheme(page, theme) {
   await page.evaluate(t => {
     document.documentElement.setAttribute('data-theme', t);
-    try { localStorage.setItem('pomelo:theme', t); } catch {}
+    try {
+      localStorage.setItem('pomelo:v1:theme', JSON.stringify(t));
+    } catch {}
   }, theme);
   await page.waitForTimeout(150);
 }
@@ -53,7 +63,7 @@ async function setTheme(page, theme) {
 async function findLightPocketsInDark(page) {
   return await page.evaluate(() => {
     const out = [];
-    const isLight = (bg) => {
+    const isLight = bg => {
       if (!bg) return false;
       const m = bg.match(/rgba?\(([^)]+)\)/);
       if (!m) return false;
@@ -69,15 +79,27 @@ async function findLightPocketsInDark(page) {
       if (rect.width < 60 || rect.height < 30) continue;
       const cs = getComputedStyle(el);
       if (!isLight(cs.backgroundColor)) continue;
-      let p = el.parentElement, skip = false;
-      while (p) { if (seen.has(p)) { skip = true; break; } p = p.parentElement; }
+      let p = el.parentElement,
+        skip = false;
+      while (p) {
+        if (seen.has(p)) {
+          skip = true;
+          break;
+        }
+        p = p.parentElement;
+      }
       if (skip) continue;
       seen.add(el);
       const pth = [];
       let cur = el;
       while (cur && pth.length < 4) {
         const tag = cur.tagName.toLowerCase();
-        const cls = (cur.className || '').toString().split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+        const cls = (cur.className || '')
+          .toString()
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .join('.');
         pth.unshift(cls ? `${tag}.${cls}` : tag);
         cur = cur.parentElement;
       }
@@ -131,7 +153,13 @@ async function audit(page, screen, theme, screenshotName) {
   if (theme === 'dark') {
     const pockets = await findLightPocketsInDark(page);
     if (pockets.length) {
-      appendFinding({ screen, theme, severity: 'P2', kind: 'light-pocket-in-dark', detail: pockets });
+      appendFinding({
+        screen,
+        theme,
+        severity: 'P2',
+        kind: 'light-pocket-in-dark',
+        detail: pockets,
+      });
     }
   }
 }
@@ -166,13 +194,23 @@ for (const theme of ['light', 'dark']) {
       test.setTimeout(45_000);
       await freshLogin(page, USER);
       await setTheme(page, theme);
-      const submitBtn = page.locator('button:has-text("Submit Ticket"), button:has-text("New Ticket"), button:has-text("Submit a Ticket")').first();
+      const submitBtn = page
+        .locator(
+          'button:has-text("Submit Ticket"), button:has-text("New Ticket"), button:has-text("Submit a Ticket")'
+        )
+        .first();
       if (await submitBtn.count()) {
         await submitBtn.click().catch(() => {});
         await page.waitForTimeout(400);
         await audit(page, 'Submit Ticket (user)', theme, 'user-submit');
       } else {
-        appendFinding({ screen: 'Submit Ticket (user)', theme, severity: 'P3', kind: 'navigation', detail: 'no Submit Ticket button found' });
+        appendFinding({
+          screen: 'Submit Ticket (user)',
+          theme,
+          severity: 'P3',
+          kind: 'navigation',
+          detail: 'no Submit Ticket button found',
+        });
       }
     });
 
@@ -180,7 +218,9 @@ for (const theme of ['light', 'dark']) {
       test.setTimeout(45_000);
       await freshLogin(page, USER);
       await setTheme(page, theme);
-      const docsBtn = page.locator('button:has-text("Docs"), button:has-text("Documents"), a:has-text("Docs")').first();
+      const docsBtn = page
+        .locator('button:has-text("Docs"), button:has-text("Documents"), a:has-text("Docs")')
+        .first();
       if (await docsBtn.count()) {
         await docsBtn.click().catch(() => {});
         await page.waitForTimeout(400);
@@ -221,7 +261,10 @@ for (const theme of ['light', 'dark']) {
       await setTheme(page, theme);
       await page.click('button[aria-label="Admin tools"]').catch(() => {});
       await page.waitForTimeout(200);
-      await page.locator('[role="menuitem"]:has-text("Admin Console")').click().catch(() => {});
+      await page
+        .locator('[role="menuitem"]:has-text("Admin Console")')
+        .click()
+        .catch(() => {});
       await page.waitForTimeout(500);
       await audit(page, 'Admin Console', theme, 'admin-console');
     });
@@ -232,7 +275,10 @@ for (const theme of ['light', 'dark']) {
       await setTheme(page, theme);
       await page.click('button[aria-label="Admin tools"]').catch(() => {});
       await page.waitForTimeout(200);
-      await page.locator('[role="menuitem"]:has-text("Users")').click().catch(() => {});
+      await page
+        .locator('[role="menuitem"]:has-text("Users")')
+        .click()
+        .catch(() => {});
       await page.waitForTimeout(500);
       await audit(page, 'Users panel', theme, 'admin-users');
     });
@@ -243,7 +289,10 @@ for (const theme of ['light', 'dark']) {
       await setTheme(page, theme);
       await page.click('button[aria-label="Admin tools"]').catch(() => {});
       await page.waitForTimeout(200);
-      await page.locator('[role="menuitem"]:has-text("Audit log")').click().catch(() => {});
+      await page
+        .locator('[role="menuitem"]:has-text("Audit log")')
+        .click()
+        .catch(() => {});
       await page.waitForTimeout(500);
       await audit(page, 'Audit log', theme, 'admin-audit');
     });
@@ -254,7 +303,10 @@ for (const theme of ['light', 'dark']) {
       await setTheme(page, theme);
       await page.click('button[aria-label="Admin tools"]').catch(() => {});
       await page.waitForTimeout(200);
-      await page.locator('[role="menuitem"]:has-text("Chat logs")').click().catch(() => {});
+      await page
+        .locator('[role="menuitem"]:has-text("Chat logs")')
+        .click()
+        .catch(() => {});
       await page.waitForTimeout(500);
       await audit(page, 'Chat logs', theme, 'admin-chatlogs');
     });
@@ -280,7 +332,7 @@ for (const theme of ['light', 'dark']) {
     await page.evaluate(() => {
       sessionStorage.clear();
       Object.keys(localStorage)
-        .filter(k => k.startsWith('pomelo:') && k !== 'pomelo:theme')
+        .filter(k => k.startsWith('pomelo:') && k !== 'pomelo:v1:theme')
         .forEach(k => localStorage.removeItem(k));
     });
     await page.reload();

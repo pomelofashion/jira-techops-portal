@@ -139,7 +139,7 @@ export default function FilePreviewCard({ name, size, type, src, onRemove, compa
       onMouseLeave={
         src
           ? e => {
-              e.currentTarget.style.borderColor = '#E5E7EB';
+              e.currentTarget.style.borderColor = 'var(--border-default)';
               e.currentTarget.style.boxShadow = 'none';
             }
           : undefined
@@ -214,7 +214,7 @@ export default function FilePreviewCard({ name, size, type, src, onRemove, compa
             {meta.label.toUpperCase()}
           </span>
           <span>{fmtFileSize(size)}</span>
-          {opensInTab && <span style={{ color: '#9CA3AF' }}>· opens in a new tab</span>}
+          {opensInTab && <span style={{ color: 'var(--text-muted)' }}>· opens in a new tab</span>}
           {!src && size > ATTACHMENT_DATAURL_LIMIT && (
             <span style={{ color: '#92400E' }}>· preview unavailable (over 1 MB)</span>
           )}

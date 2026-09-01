@@ -182,7 +182,7 @@ export default function SlaPolicyEditor({ canManage, onToast }) {
                       fontSize: '12px',
                       color: '#16A34A',
                       fontWeight: 700,
-                      background: '#DCFCE7',
+                      background: 'rgba(22, 163, 74, 0.18)',
                       padding: '3px 10px',
                       borderRadius: '100px',
                     }}

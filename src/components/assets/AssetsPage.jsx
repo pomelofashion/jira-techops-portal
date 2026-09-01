@@ -25,7 +25,7 @@ export const ASSET_STATUS_META = {
   'in-stock': { label: 'In stock', color: '#16A34A' },
   assigned: { label: 'Assigned', color: '#6366F1' },
   repair: { label: 'In repair', color: '#D97706' },
-  retired: { label: 'Retired', color: '#6B7280' },
+  retired: { label: 'Retired', color: 'var(--text-muted)' },
 };
 export const ASSET_TYPE_LABEL = { hardware: 'Hardware', software: 'Software', license: 'License' };
 

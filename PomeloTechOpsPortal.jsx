@@ -1282,18 +1282,18 @@ function useJiraSla(jiraKey) {
 
 // PR lifecycle status → presentation (icon, colours, label).
 const PR_STATUS_META = {
-  OPEN: { icon: '🟢', label: 'Open', bg: '#DCFCE7', fg: '#15803D' },
+  OPEN: { icon: '🟢', label: 'Open', bg: 'rgba(22, 163, 74, 0.18)', fg: '#15803D' },
   DRAFT: { icon: '📝', label: 'Draft', bg: 'var(--bg-hover)', fg: 'var(--text-secondary)' },
-  MERGED: { icon: '🟣', label: 'Merged', bg: '#F3E8FF', fg: '#7E22CE' },
-  DECLINED: { icon: '🔴', label: 'Declined', bg: '#FEE2E2', fg: '#B91C1C' },
+  MERGED: { icon: '🟣', label: 'Merged', bg: 'rgba(147, 51, 234, 0.14)', fg: '#7E22CE' },
+  DECLINED: { icon: '🔴', label: 'Declined', bg: 'rgba(220, 38, 38, 0.18)', fg: '#B91C1C' },
 };
 const prStatusMeta = status => PR_STATUS_META[status] || PR_STATUS_META.OPEN;
 
 // CI/checks rollup → presentation.
 const PR_CHECK_META = {
-  success: { icon: '✓', label: 'Checks passing', bg: '#DCFCE7', fg: '#15803D' },
-  failed: { icon: '✕', label: 'Checks failing', bg: '#FEE2E2', fg: '#B91C1C' },
-  pending: { icon: '•', label: 'Checks running', bg: '#FEF3C7', fg: '#92400E' },
+  success: { icon: '✓', label: 'Checks passing', bg: 'rgba(22, 163, 74, 0.18)', fg: '#15803D' },
+  failed: { icon: '✕', label: 'Checks failing', bg: 'rgba(220, 38, 38, 0.18)', fg: '#B91C1C' },
+  pending: { icon: '•', label: 'Checks running', bg: 'rgba(245, 158, 11, 0.18)', fg: '#92400E' },
 };
 const prCheckMeta = status => PR_CHECK_META[status] || null;
 
@@ -1443,7 +1443,7 @@ function TicketAttachments({ local = [], jira = [] }) {
       >
         📎 Attachments ({all.length})
         {jiraList.length > 0 && localList.length > 0 && (
-          <span style={{ fontSize: '10px', color: '#9CA3AF', fontWeight: 600 }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>
             · {localList.length} local · {jiraList.length} from Jira
           </span>
         )}
@@ -2447,7 +2447,7 @@ function SignupModal({ onClose, onToast }) {
         {/* Header */}
         <div
           style={{
-            background: '#111111',
+            background: 'var(--bg-branded)',
             padding: '20px 24px',
             display: 'flex',
             alignItems: 'center',
@@ -2583,7 +2583,7 @@ function SignupModal({ onClose, onToast }) {
               style={{
                 padding: '12px 16px',
                 borderRadius: '8px',
-                background: '#FEF2F2',
+                background: 'rgba(220, 38, 38, 0.10)',
                 border: '1px solid #FCA5A5',
                 color: '#DC2626',
                 fontSize: '13px',
@@ -3090,7 +3090,7 @@ function LoginPage({ onLogin, onToast }) {
           marginTop: '14px',
           padding: '12px 16px',
           borderRadius: '8px',
-          background: '#FEF2F2',
+          background: 'rgba(220, 38, 38, 0.10)',
           border: '1px solid #FCA5A5',
           color: '#DC2626',
           fontSize: '13px',
@@ -3292,7 +3292,7 @@ function LoginPage({ onLogin, onToast }) {
                 style={{
                   padding: '12px 16px',
                   borderRadius: '8px',
-                  background: '#FEF2F2',
+                  background: 'rgba(220, 38, 38, 0.10)',
                   border: '1px solid #FCA5A5',
                   color: '#DC2626',
                   fontSize: '13px',
@@ -3530,7 +3530,7 @@ function LoginPage({ onLogin, onToast }) {
         className="login-left"
         style={{
           width: '42%',
-          background: '#111111',
+          background: 'var(--bg-branded)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
@@ -3667,7 +3667,7 @@ function Toast({ message, type = 'success', onDone }) {
   }, [onDone]);
 
   const variants = {
-    success: { bg: '#111111', icon: '✅', title: 'Done!' },
+    success: { bg: 'var(--bg-branded)', icon: '✅', title: 'Done!' },
     error: { bg: '#DC2626', icon: '❌', title: 'Something went wrong' },
     info: { bg: '#0369A1', icon: 'ℹ️', title: 'Note' },
   };
@@ -3758,7 +3758,7 @@ function PrioritySuggester({ onSelect }) {
   return (
     <div
       style={{
-        background: '#F0F4FF',
+        background: 'var(--accent-soft)',
         border: '1.5px solid #BFDBFE',
         borderRadius: '10px',
         padding: '16px 20px',
@@ -4595,7 +4595,7 @@ function TicketDetail({
                     alignItems: 'center',
                     gap: '6px',
                     padding: '5px 10px',
-                    background: '#EFF6FF',
+                    background: 'rgba(59, 130, 246, 0.12)',
                     borderRadius: '100px',
                     border: '1px solid #BFDBFE',
                     fontSize: '11px',
@@ -4691,7 +4691,7 @@ function TicketDetail({
                       fontSize: '11px',
                       padding: '2px 7px',
                       borderRadius: '4px',
-                      background: '#FEE2E2',
+                      background: 'rgba(220, 38, 38, 0.18)',
                       color: '#B91C1C',
                       fontWeight: 700,
                     }}
@@ -4704,7 +4704,7 @@ function TicketDetail({
                       fontSize: '11px',
                       padding: '2px 7px',
                       borderRadius: '4px',
-                      background: '#DCFCE7',
+                      background: 'rgba(22, 163, 74, 0.18)',
                       color: '#15803D',
                       fontWeight: 700,
                     }}
@@ -4903,7 +4903,7 @@ function TicketDetail({
                     fontSize: '11px',
                     padding: '3px 9px',
                     borderRadius: '100px',
-                    background: '#EFF6FF',
+                    background: 'rgba(59, 130, 246, 0.12)',
                     color: '#1E3A8A',
                     fontWeight: 600,
                   }}
@@ -4968,7 +4968,7 @@ function TicketDetail({
                   fontSize: '11px',
                   padding: '3px 9px',
                   borderRadius: '100px',
-                  background: '#FAF5FF',
+                  background: 'rgba(147, 51, 234, 0.08)',
                   color: '#6B21A8',
                   fontWeight: 600,
                 }}
@@ -4983,7 +4983,7 @@ function TicketDetail({
                   fontSize: '11px',
                   padding: '3px 9px',
                   borderRadius: '4px',
-                  background: '#FFF7ED',
+                  background: 'rgba(234, 88, 12, 0.10)',
                   color: 'var(--accent-primary)',
                   fontWeight: 700,
                 }}
@@ -5009,7 +5009,7 @@ function TicketDetail({
                 fontSize: '10px',
                 padding: '2px 7px',
                 borderRadius: '4px',
-                background: '#FEF3C7',
+                background: 'rgba(245, 158, 11, 0.18)',
                 color: '#92400E',
                 fontWeight: 700,
                 textTransform: 'uppercase',
@@ -5033,7 +5033,7 @@ function TicketDetail({
                   key={n.id}
                   style={{
                     padding: '10px 12px',
-                    background: '#FFFBEB',
+                    background: 'rgba(245, 158, 11, 0.10)',
                     borderRadius: '8px',
                     border: '1px solid #FDE68A',
                   }}
@@ -5081,7 +5081,7 @@ function TicketDetail({
               disabled={!newNote.trim()}
               style={{
                 padding: '9px 16px',
-                background: newNote.trim() ? '#111111' : 'var(--border-default)',
+                background: newNote.trim() ? 'var(--bg-branded)' : 'var(--border-default)',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '8px',
@@ -5980,7 +5980,7 @@ function TicketDetail({
                         height: '28px',
                         borderRadius: '50%',
                         flexShrink: 0,
-                        background: isYou ? 'var(--accent-primary)' : '#111111',
+                        background: isYou ? 'var(--accent-primary)' : 'var(--bg-branded)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -6186,10 +6186,14 @@ function SlaChip({ ticket }) {
     if (!breached && !responseBreached && !atRisk) return null;
     const overdueHrs = due ? Math.max(0, (now - due) / 3600000) : 0;
     const palette = breached
-      ? { bg: '#FEE2E2', fg: '#B91C1C', label: `🔴 SLA breached +${fmt(overdueHrs)}` }
+      ? {
+          bg: 'rgba(220, 38, 38, 0.18)',
+          fg: '#B91C1C',
+          label: `🔴 SLA breached +${fmt(overdueHrs)}`,
+        }
       : responseBreached
-        ? { bg: '#FEE2E2', fg: '#B91C1C', label: '🔴 Response SLA missed' }
-        : { bg: '#FEF3C7', fg: '#92400E', label: '🟡 SLA at risk' };
+        ? { bg: 'rgba(220, 38, 38, 0.18)', fg: '#B91C1C', label: '🔴 Response SLA missed' }
+        : { bg: 'rgba(245, 158, 11, 0.18)', fg: '#92400E', label: '🟡 SLA at risk' };
     const title = due
       ? `Resolution due ${new Date(due).toLocaleString()}`
       : `Response due ${new Date(sla.responseDueAt).toLocaleString()}`;
@@ -6217,8 +6221,12 @@ function SlaChip({ ticket }) {
   const overdueHrs = Math.max(0, ageHrs - target.resolution);
   const palette =
     state === 'breached'
-      ? { bg: '#FEE2E2', fg: '#B91C1C', label: `🔴 SLA breached +${fmt(overdueHrs)}` }
-      : { bg: '#FEF3C7', fg: '#92400E', label: `🟡 SLA at risk` };
+      ? {
+          bg: 'rgba(220, 38, 38, 0.18)',
+          fg: '#B91C1C',
+          label: `🔴 SLA breached +${fmt(overdueHrs)}`,
+        }
+      : { bg: 'rgba(245, 158, 11, 0.18)', fg: '#92400E', label: `🟡 SLA at risk` };
   const title = `Priority ${ticket.priority}: resolution target ${target.resolution}h; age ${fmt(ageHrs)}`;
   return (
     <span
@@ -6242,10 +6250,14 @@ function JiraSyncChip({ ticket }) {
   if (!ticket) return null;
   const state = ticket.jiraSyncState || (ticket.jiraKey ? 'synced' : 'local-only');
   const palette = {
-    synced: { bg: '#DBEAFE', fg: '#1D4ED8', label: `🔵 ${ticket.jiraKey || 'Jira'}` },
-    syncing: { bg: '#FEF3C7', fg: '#92400E', label: '🔄 Syncing…' },
-    error: { bg: '#FEE2E2', fg: '#B91C1C', label: '❌ Sync error' },
-    diverged: { bg: '#FFEDD5', fg: 'var(--accent-primary)', label: '⚠️ Diverged' },
+    synced: {
+      bg: 'rgba(59, 130, 246, 0.18)',
+      fg: '#1D4ED8',
+      label: `🔵 ${ticket.jiraKey || 'Jira'}`,
+    },
+    syncing: { bg: 'rgba(245, 158, 11, 0.18)', fg: '#92400E', label: '🔄 Syncing…' },
+    error: { bg: 'rgba(220, 38, 38, 0.18)', fg: '#B91C1C', label: '❌ Sync error' },
+    diverged: { bg: 'rgba(234, 88, 12, 0.16)', fg: 'var(--accent-primary)', label: '⚠️ Diverged' },
     'local-only': { bg: 'var(--bg-hover)', fg: 'var(--text-secondary)', label: '⚪ Local only' },
   };
   const p = palette[state] || palette['local-only'];
@@ -6285,10 +6297,10 @@ function DevChip({ ticket }) {
   const allMerged = d.prCount > 0 && d.prSummary.merged === d.prCount;
   const palette =
     d.builds.status === 'failing'
-      ? { bg: '#FEE2E2', fg: '#B91C1C' }
+      ? { bg: 'rgba(220, 38, 38, 0.18)', fg: '#B91C1C' }
       : allMerged
-        ? { bg: '#F3E8FF', fg: '#7E22CE' }
-        : { bg: '#EFF6FF', fg: '#1D4ED8' };
+        ? { bg: 'rgba(147, 51, 234, 0.14)', fg: '#7E22CE' }
+        : { bg: 'rgba(59, 130, 246, 0.12)', fg: '#1D4ED8' };
   const buildIcon =
     d.builds.status === 'failing' ? '❌' : d.builds.status === 'pending' ? '🟡' : '✅';
   const title =
@@ -6500,9 +6512,13 @@ function PrCard({ pr }) {
               {pr.reviews.map((r, i) => {
                 const rp =
                   r.state === 'APPROVED'
-                    ? { bg: '#DCFCE7', fg: '#15803D', label: '✓ Approved' }
+                    ? { bg: 'rgba(22, 163, 74, 0.18)', fg: '#15803D', label: '✓ Approved' }
                     : r.state === 'CHANGES_REQUESTED'
-                      ? { bg: '#FEE2E2', fg: '#B91C1C', label: '✕ Changes requested' }
+                      ? {
+                          bg: 'rgba(220, 38, 38, 0.18)',
+                          fg: '#B91C1C',
+                          label: '✕ Changes requested',
+                        }
                       : {
                           bg: 'var(--bg-hover)',
                           fg: 'var(--text-secondary)',
@@ -6628,7 +6644,7 @@ function DevelopmentPopup({ ticket, prs, onClose }) {
       >
         <div
           style={{
-            background: '#111111',
+            background: 'var(--bg-branded)',
             padding: '18px 22px',
             display: 'flex',
             justifyContent: 'space-between',
@@ -6795,7 +6811,7 @@ function DevelopmentPanel({ ticket }) {
               fontSize: '10px',
               padding: '2px 7px',
               borderRadius: '4px',
-              background: '#DBEAFE',
+              background: 'rgba(59, 130, 246, 0.18)',
               color: '#1D4ED8',
               fontWeight: 700,
             }}
@@ -7074,7 +7090,7 @@ function TicketPopupModal({ ticket, onClose, onOpenFull }) {
         {/* Header */}
         <div
           style={{
-            background: '#111111',
+            background: 'var(--bg-branded)',
             padding: '18px 22px',
             display: 'flex',
             justifyContent: 'space-between',
@@ -7482,7 +7498,13 @@ function ProfileModal({ currentUser, setCurrentUser, onClose, onLogout }) {
         }}
       >
         {/* Header */}
-        <div style={{ background: '#111111', padding: '20px 22px 40px', position: 'relative' }}>
+        <div
+          style={{
+            background: 'var(--bg-branded)',
+            padding: '20px 22px 40px',
+            position: 'relative',
+          }}
+        >
           <button
             onClick={onClose}
             style={{
@@ -7682,7 +7704,7 @@ function HomePage({ setSection, role }) {
           width: '100vw',
           marginTop: '-32px',
           marginBottom: '28px',
-          background: 'linear-gradient(150deg, #111111 0%, #1F0F40 55%, #3F1E80 100%)',
+          background: 'linear-gradient(150deg, var(--bg-branded) 0%, #1F0F40 55%, #3F1E80 100%)',
           padding: '64px 40px 68px',
           textAlign: 'center',
           overflow: 'hidden',
@@ -7784,7 +7806,7 @@ function HomePage({ setSection, role }) {
                   onClick={() => setSection('docs')}
                   style={{
                     textAlign: 'left',
-                    background: '#FFFBEB',
+                    background: 'rgba(245, 158, 11, 0.10)',
                     border: '1px solid #FDE68A',
                     borderRadius: '10px',
                     padding: '14px 16px',
@@ -7829,7 +7851,7 @@ function HomePage({ setSection, role }) {
       {adminStats && (
         <div
           style={{
-            background: 'linear-gradient(135deg, #111111 0%, #000000 100%)',
+            background: 'linear-gradient(135deg, var(--bg-branded) 0%, var(--bg-branded-2) 100%)',
             borderRadius: '14px',
             padding: '20px 24px',
             marginBottom: '20px',
@@ -8117,7 +8139,7 @@ function PlatformCheckbox({ value, selected, onChange }) {
           height: '15px',
           borderRadius: '4px',
           flexShrink: 0,
-          background: checked ? 'var(--accent-primary)' : '#fff',
+          background: checked ? 'var(--accent-primary)' : 'var(--bg-input)',
           border: `1.5px solid ${checked ? 'var(--accent-primary)' : 'var(--border-strong)'}`,
           display: 'flex',
           alignItems: 'center',
@@ -8729,7 +8751,7 @@ function SubmitPage({ setSection, showToast, currentUser }) {
                 style={{
                   marginBottom: '8px',
                   padding: '8px 12px',
-                  background: '#FEF2F2',
+                  background: 'rgba(220, 38, 38, 0.10)',
                   color: '#B91C1C',
                   borderRadius: '7px',
                   fontSize: '12px',
@@ -8744,7 +8766,7 @@ function SubmitPage({ setSection, showToast, currentUser }) {
                 style={{
                   marginBottom: '10px',
                   padding: '12px 14px',
-                  background: '#EFF6FF',
+                  background: 'rgba(59, 130, 246, 0.12)',
                   border: '1px solid #BFDBFE',
                   borderRadius: '10px',
                 }}
@@ -8775,7 +8797,7 @@ function SubmitPage({ setSection, showToast, currentUser }) {
                       fontSize: '10px',
                       padding: '2px 7px',
                       borderRadius: '4px',
-                      background: '#DBEAFE',
+                      background: 'rgba(59, 130, 246, 0.18)',
                       color: '#1E3A8A',
                       fontWeight: 700,
                     }}
@@ -9290,7 +9312,7 @@ function MyTicketsPage({ role, currentUser, openTicketKey, onOpenedTicket }) {
             style={{
               marginLeft: 'auto',
               padding: '7px 12px',
-              background: '#111111',
+              background: 'var(--bg-branded)',
               color: '#fff',
               border: 'none',
               borderRadius: '7px',
@@ -9322,7 +9344,7 @@ function MyTicketsPage({ role, currentUser, openTicketKey, onOpenedTicket }) {
       {isAdmin && bulkIds.size > 0 && (
         <div
           style={{
-            background: '#111111',
+            background: 'var(--bg-branded)',
             color: '#fff',
             padding: '12px 18px',
             borderRadius: '10px',
@@ -9491,7 +9513,7 @@ function MyTicketsPage({ role, currentUser, openTicketKey, onOpenedTicket }) {
                         fontSize: '10px',
                         padding: '2px 7px',
                         borderRadius: '4px',
-                        background: '#FEF3C7',
+                        background: 'rgba(245, 158, 11, 0.18)',
                         color: '#92400E',
                         fontWeight: 700,
                       }}
@@ -9846,7 +9868,7 @@ function AdminPage({ setSection }) {
       {/* Admin header banner — ticket work now lives on the Board */}
       <div
         style={{
-          background: 'linear-gradient(135deg, #111111 0%, #000000 100%)',
+          background: 'linear-gradient(135deg, var(--bg-branded) 0%, var(--bg-branded-2) 100%)',
           borderRadius: '14px',
           padding: '18px 24px',
           display: 'flex',
@@ -11169,7 +11191,7 @@ function UsersPanelPage({ currentUserEmail }) {
             fontSize: '11px',
             padding: '3px 8px',
             borderRadius: '4px',
-            background: '#FEE2E2',
+            background: 'rgba(220, 38, 38, 0.18)',
             color: '#B91C1C',
             fontWeight: 700,
           }}
@@ -11184,7 +11206,7 @@ function UsersPanelPage({ currentUserEmail }) {
             fontSize: '11px',
             padding: '3px 8px',
             borderRadius: '4px',
-            background: '#FEF3C7',
+            background: 'rgba(245, 158, 11, 0.18)',
             color: '#92400E',
             fontWeight: 700,
           }}
@@ -11198,7 +11220,7 @@ function UsersPanelPage({ currentUserEmail }) {
           fontSize: '11px',
           padding: '3px 8px',
           borderRadius: '4px',
-          background: '#DCFCE7',
+          background: 'rgba(22, 163, 74, 0.18)',
           color: '#15803D',
           fontWeight: 700,
         }}
@@ -11571,7 +11593,7 @@ function UsersPanelPage({ currentUserEmail }) {
                     marginTop: '10px',
                     padding: '10px 12px',
                     borderRadius: '8px',
-                    background: '#FEF2F2',
+                    background: 'rgba(220, 38, 38, 0.10)',
                     color: '#B91C1C',
                     fontSize: '13px',
                     fontWeight: 600,
@@ -11954,7 +11976,7 @@ function UserCreateModal({ onClose }) {
             <div
               style={{
                 padding: '10px 12px',
-                background: '#FEF2F2',
+                background: 'rgba(220, 38, 38, 0.10)',
                 color: '#B91C1C',
                 borderRadius: '8px',
                 fontSize: '13px',
@@ -12147,7 +12169,7 @@ function UserEditModal({ user, onClose, currentUserEmail }) {
               style={{
                 padding: '10px 12px',
                 borderRadius: '8px',
-                background: '#FEF2F2',
+                background: 'rgba(220, 38, 38, 0.10)',
                 color: '#B91C1C',
                 fontSize: '13px',
                 fontWeight: 600,
@@ -12235,7 +12257,7 @@ function UserResetPasswordModal({ user, onClose }) {
             <div
               style={{
                 padding: '12px 14px',
-                background: '#ECFDF5',
+                background: 'rgba(16, 185, 129, 0.10)',
                 color: '#065F46',
                 borderRadius: '8px',
                 fontSize: '13px',
@@ -12286,7 +12308,7 @@ function UserResetPasswordModal({ user, onClose }) {
               <div
                 style={{
                   padding: '10px 12px',
-                  background: '#FEF2F2',
+                  background: 'rgba(220, 38, 38, 0.10)',
                   color: '#B91C1C',
                   borderRadius: '8px',
                   fontSize: '13px',
@@ -12631,7 +12653,7 @@ function MaintenanceToggleCard() {
             fontSize: '11px',
             padding: '3px 8px',
             borderRadius: '4px',
-            background: m.active ? '#FEE2E2' : '#DCFCE7',
+            background: m.active ? 'rgba(220, 38, 38, 0.18)' : 'rgba(22, 163, 74, 0.18)',
             color: m.active ? '#B91C1C' : '#15803D',
             fontWeight: 700,
           }}
@@ -12665,7 +12687,7 @@ function MaintenanceToggleCard() {
           marginTop: '10px',
           width: '100%',
           padding: '9px',
-          background: m.active ? '#DC2626' : '#111111',
+          background: m.active ? '#DC2626' : 'var(--bg-branded)',
           color: '#fff',
           border: 'none',
           borderRadius: '7px',
@@ -13076,7 +13098,7 @@ function ChatAssistantWidget({ effectiveUser, effectiveRole }) {
         >
           <div
             style={{
-              background: '#111111',
+              background: 'var(--bg-branded)',
               color: '#fff',
               padding: '14px 16px',
               display: 'flex',
@@ -13194,7 +13216,7 @@ function ChatAssistantWidget({ effectiveUser, effectiveRole }) {
               <div
                 role="alert"
                 style={{
-                  background: '#FEF2F2',
+                  background: 'rgba(220, 38, 38, 0.10)',
                   color: '#B91C1C',
                   padding: '8px 12px',
                   borderRadius: '8px',
@@ -13271,7 +13293,7 @@ function MaintenanceBanner() {
     <div
       role="status"
       style={{
-        background: '#FEF3C7',
+        background: 'rgba(245, 158, 11, 0.18)',
         borderBottom: '2px solid #FDE68A',
         padding: '10px 28px',
         display: 'flex',
@@ -14590,6 +14612,9 @@ const THEME_TOKENS_CSS = `
     --shadow-dropdown: 0 1px 3px rgba(15,15,18,0.06), 0 8px 24px rgba(15,15,18,0.10), 0 16px 40px rgba(15,15,18,0.06);
     --shadow-modal: 0 4px 12px rgba(15,15,18,0.08), 0 32px 80px rgba(15,15,18,0.15);
     --focus-ring: 0 0 0 3px rgba(99,102,241,0.18);
+    --bg-branded: var(--bg-branded);
+    --bg-branded-2: #000000;
+    --text-on-branded: #FFFFFF;
   }
   [data-theme="dark"] {
     --bg-page: #0B0B0E;
@@ -14613,6 +14638,9 @@ const THEME_TOKENS_CSS = `
     --shadow-dropdown: 0 1px 3px rgba(0,0,0,0.5), 0 8px 24px rgba(0,0,0,0.6), 0 16px 48px rgba(0,0,0,0.3);
     --shadow-modal: 0 4px 12px rgba(0,0,0,0.5), 0 32px 80px rgba(0,0,0,0.7);
     --focus-ring: 0 0 0 3px rgba(129,140,248,0.30);
+    --bg-branded: #232329;
+    --bg-branded-2: #1A1A1F;
+    --text-on-branded: #FFFFFF;
   }
   :root {
     --radius-sm: 6px;
@@ -15519,7 +15547,7 @@ function AppContent() {
                       fontSize: '10px',
                       padding: '2px 6px',
                       borderRadius: '4px',
-                      background: '#FEF3C7',
+                      background: 'rgba(245, 158, 11, 0.18)',
                       color: '#92400E',
                       fontWeight: 700,
                       letterSpacing: '0.04em',

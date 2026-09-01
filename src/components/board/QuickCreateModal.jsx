@@ -186,7 +186,7 @@ export default function QuickCreateModal({ onClose, onCreate, assignableUsers, o
             <div
               style={{
                 padding: '9px 12px',
-                background: '#FEF2F2',
+                background: 'rgba(220, 38, 38, 0.10)',
                 color: '#B91C1C',
                 borderRadius: '8px',
                 fontSize: '13px',

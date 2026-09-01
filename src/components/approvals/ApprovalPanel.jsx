@@ -9,10 +9,25 @@ import { S } from '../../lib/styles.js';
 import { listSubjectApprovals, decideApproval } from '../../api/approvalsApi.js';
 
 const STATE_META = {
-  pending: { color: '#D97706', bg: '#FFFBEB', Icon: Clock, label: 'Approval pending' },
-  approved: { color: '#16A34A', bg: '#F0FDF4', Icon: CheckCircle2, label: 'Approved' },
-  rejected: { color: '#DC2626', bg: '#FEF2F2', Icon: XCircle, label: 'Rejected' },
-  cancelled: { color: '#6B7280', bg: 'var(--bg-hover)', Icon: XCircle, label: 'Cancelled' },
+  pending: {
+    color: '#D97706',
+    bg: 'rgba(245, 158, 11, 0.10)',
+    Icon: Clock,
+    label: 'Approval pending',
+  },
+  approved: {
+    color: '#16A34A',
+    bg: 'rgba(22, 163, 74, 0.10)',
+    Icon: CheckCircle2,
+    label: 'Approved',
+  },
+  rejected: { color: '#DC2626', bg: 'rgba(220, 38, 38, 0.10)', Icon: XCircle, label: 'Rejected' },
+  cancelled: {
+    color: 'var(--text-muted)',
+    bg: 'var(--bg-hover)',
+    Icon: XCircle,
+    label: 'Cancelled',
+  },
 };
 
 export default function ApprovalPanel({
