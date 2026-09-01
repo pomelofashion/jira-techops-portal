@@ -29,6 +29,7 @@ import { compressImageToDataUrl } from './src/lib/imageUtil.js';
 import * as authApi from './src/api/authApi.js';
 import * as ticketsApi from './src/api/ticketsApi.js';
 import * as usersApi from './src/api/usersApi.js';
+import * as feedbackApi from './src/api/feedbackApi.js';
 import * as rolesApi from './src/api/rolesApi.js';
 import * as spacesApi from './src/api/spacesApi.js';
 import { loadStore, saveStore, clearStore } from './src/lib/store.js';
@@ -1539,43 +1540,6 @@ function useModalFocusTrap(ref) {
 // authentication happens in src/api/authApi.js against the BFF instead.
 let MOCK_USERS = [...DEMO_SEED_USERS];
 
-// ─── Chat log store (in-memory) ───────────────────────────────────────────────
-// Sessions captured for future training / cap tuning. Each session is one
-// continuous chat between a user and the assistant.
-const CHAT_SESSIONS = [];
-const _chatListeners = new Set();
-const subscribeChat = fn => {
-  _chatListeners.add(fn);
-  return () => _chatListeners.delete(fn);
-};
-const bumpChat = () => {
-  _chatListeners.forEach(fn => fn());
-  saveStore('chatSessions', CHAT_SESSIONS);
-};
-
-const startChatSession = ({ userName, userEmail, userRole }) => {
-  const id = 'c' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-  CHAT_SESSIONS.unshift({
-    id,
-    userName: userName || 'Anonymous',
-    userEmail: userEmail || null,
-    userRole: userRole || 'user',
-    startedAt: new Date().toISOString(),
-    messages: [],
-  });
-  bumpChat();
-  return id;
-};
-
-const appendChatMessage = (sessionId, role, content) => {
-  const s = CHAT_SESSIONS.find(s => s.id === sessionId);
-  if (!s) return;
-  s.messages.push({ role, content, ts: new Date().toISOString() });
-  bumpChat();
-};
-
-const listChatSessions = () => CHAT_SESSIONS.slice();
-
 // ─── Maintenance mode (in-memory toggle) ──────────────────────────────────────
 let MAINTENANCE = { active: false, message: '', enabledBy: null, enabledAt: null };
 const _maintListeners = new Set();
@@ -1717,10 +1681,6 @@ for (const t of MOCK_TICKETS) {
   const storedAudit = loadStore('audit', null);
   if (Array.isArray(storedAudit)) {
     replaceArrayInPlace(AUDIT_LOG, storedAudit);
-  }
-  const storedChat = loadStore('chatSessions', null);
-  if (Array.isArray(storedChat)) {
-    replaceArrayInPlace(CHAT_SESSIONS, storedChat);
   }
   const storedMaint = loadStore('maintenance', null);
   if (storedMaint && typeof storedMaint === 'object') {
@@ -13075,105 +13035,82 @@ function ResultsGroup({ label, icon, items, onPick }) {
   );
 }
 
-// ─── Chat assistant widget (all authenticated users) ─────────────────────────
-function ChatAssistantWidget({ effectiveUser, effectiveRole }) {
+// ─── Feedback widget (all authenticated users) ────────────────────────────────
+// The floating bubble on every page. Opens a small form — header + comment —
+// with a read-only "Page" field captured from the section the user was on
+// when they opened it, so admins always get the context.
+function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content}
-  const [draft, setDraft] = useState('');
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
-  const sessionIdRef = useRef(null);
-  const scrollRef = useRef(null);
+  // Captured at open time so navigating while typing doesn't move it.
+  const [capturedPage, setCapturedPage] = useState({ page: 'home', label: 'Home' });
 
-  // Reset conversation when the effective user changes (login / view-as switch)
-  useEffect(() => {
-    setMessages([]);
+  const openPanel = () => {
+    const label =
+      (SECTION_LABELS[section] || section) +
+      (section === 'board' && activeBoardKey ? ` · ${activeBoardKey}` : '');
+    setCapturedPage({ page: section, label });
+    setSent(false);
     setError('');
-    sessionIdRef.current = null;
-  }, [effectiveUser?.email, effectiveRole]);
-
-  useEffect(() => {
-    if (open)
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, open]);
-
-  const buildUserContext = () => {
-    if (!effectiveUser) return undefined;
-    const openTickets = MOCK_TICKETS.filter(
-      t => t.assignee === effectiveUser.name && statusCategoryFor(t.status) !== 'done'
-    )
-      .slice(0, 10)
-      .map(t => ({ id: t.id, title: t.title, status: t.status, priority: t.priority }));
-    return {
-      name: effectiveUser.name,
-      role: effectiveRole === 'superadmin' ? 'superadmin' : 'user',
-      openTickets,
-    };
+    setOpen(true);
   };
 
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || busy) return;
-    setError('');
-    const userMsg = { role: 'user', content: text };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
-    setDraft('');
+  const submit = async () => {
+    if (!title.trim() || !body.trim() || busy) return;
     setBusy(true);
-
-    // Start a chat session lazily on first message
-    if (!sessionIdRef.current) {
-      sessionIdRef.current = startChatSession({
-        userName: effectiveUser?.name,
-        userEmail: effectiveUser?.email,
-        userRole: effectiveRole,
+    setError('');
+    if (API_ENABLED) {
+      const { error: apiError } = await feedbackApi.submitFeedback({
+        title: title.trim(),
+        body: body.trim(),
+        page: capturedPage.page,
+        pageLabel: capturedPage.label.slice(0, 80),
       });
-    }
-    appendChatMessage(sessionIdRef.current, 'user', text);
-
-    try {
-      const res = await fetch('/api/v1/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: nextMessages,
-          userContext: buildUserContext(),
-          portalContext: { docs: listDocSummaries() },
-        }),
-      });
-      if (res.status === 503) {
-        setError('The chat assistant is not configured on the server.');
+      if (apiError) {
+        setError(apiError);
         setBusy(false);
         return;
       }
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e?.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      const reply = (data.reply || '').trim() || '(no reply)';
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
-      appendChatMessage(sessionIdRef.current, 'assistant', reply);
-    } catch (e) {
-      setError(e.message || 'Could not reach the chat assistant.');
-    } finally {
-      setBusy(false);
     }
+    setBusy(false);
+    setSent(true);
+    setTitle('');
+    setBody('');
   };
 
-  const onKeyDown = e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
+  const fieldLabel = {
+    display: 'block',
+    fontSize: '11px',
+    fontWeight: 700,
+    color: 'var(--text-secondary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginBottom: '5px',
+  };
+  const fieldInput = {
+    width: '100%',
+    padding: '9px 12px',
+    borderRadius: '8px',
+    border: '1.5px solid var(--border-default)',
+    fontSize: '13px',
+    fontFamily: "'Inter', sans-serif",
+    background: 'var(--bg-input)',
+    color: 'var(--text-primary)',
+    outline: 'none',
+    boxSizing: 'border-box',
   };
 
   return (
     <>
       {!open && (
         <button
-          onClick={() => setOpen(true)}
-          aria-label="Open chat assistant"
+          onClick={openPanel}
+          aria-label="Send feedback"
+          title="Send feedback"
           style={{
             position: 'fixed',
             bottom: '24px',
@@ -13183,7 +13120,6 @@ function ChatAssistantWidget({ effectiveUser, effectiveRole }) {
             height: '56px',
             borderRadius: '50%',
             background: 'var(--accent-primary)',
-            color: '#fff',
             border: 'none',
             boxShadow: '0 8px 24px rgba(124,58,237,0.4)',
             cursor: 'pointer',
@@ -13193,14 +13129,14 @@ function ChatAssistantWidget({ effectiveUser, effectiveRole }) {
             justifyContent: 'center',
           }}
         >
-          💬
+          💡
         </button>
       )}
       {open && (
         <div
           role="dialog"
           aria-modal="false"
-          aria-label="TechOps assistant"
+          aria-label="Send feedback"
           style={{
             position: 'fixed',
             bottom: '24px',
@@ -13208,199 +13144,181 @@ function ChatAssistantWidget({ effectiveUser, effectiveRole }) {
             zIndex: 950,
             width: '380px',
             maxWidth: 'calc(100vw - 32px)',
-            height: '540px',
-            maxHeight: 'calc(100vh - 80px)',
             background: 'var(--bg-surface)',
             borderRadius: '14px',
             boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            fontFamily: "'Inter', sans-serif",
           }}
         >
+          {/* Header */}
           <div
             style={{
               background: 'var(--bg-branded)',
-              color: '#fff',
               padding: '14px 16px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
+              gap: '10px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '50%',
-                  background: 'var(--accent-primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '15px',
-                }}
-              >
-                💬
-              </div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '14px' }}>TechOps Assistant</div>
-                <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)' }}>
-                  Ask anything about the portal or IT
-                </div>
+            <div
+              style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+              }}
+            >
+              💡
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: '#fff', fontWeight: 800, fontSize: '14px' }}>Share feedback</div>
+              <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}>
+                Help us improve the portal
               </div>
             </div>
             <button
               onClick={() => setOpen(false)}
-              aria-label="Close chat"
+              aria-label="Close feedback"
               style={{
                 background: 'none',
                 border: 'none',
-                color: 'rgba(255,255,255,0.7)',
-                fontSize: '22px',
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: '20px',
                 cursor: 'pointer',
                 lineHeight: 1,
+                padding: 0,
               }}
             >
               ×
             </button>
           </div>
 
-          <div
-            ref={scrollRef}
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: '16px',
-              background: 'var(--bg-page)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-            {messages.length === 0 && (
+          {sent ? (
+            <div style={{ padding: '28px 20px', textAlign: 'center' }}>
+              <div style={{ fontSize: '32px', marginBottom: '10px' }}>✅</div>
               <div
                 style={{
-                  textAlign: 'center',
-                  color: 'var(--text-secondary)',
-                  fontSize: '13px',
-                  padding: '24px 16px',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  color: 'var(--text-primary)',
+                  marginBottom: '4px',
                 }}
               >
-                Hi{effectiveUser?.name ? ` ${effectiveUser.name.split(' ')[0]}` : ''} 👋
-                <br />
-                Ask me how the portal works, where to find a doc, or anything IT-related.
+                Thanks — your feedback was sent
               </div>
-            )}
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
-                }}
-              >
-                <div
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                The team reviews every submission.
+              </div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                <button
+                  onClick={() => setSent(false)}
                   style={{
-                    maxWidth: '85%',
-                    padding: '9px 13px',
-                    borderRadius: '12px',
-                    background: m.role === 'user' ? 'var(--accent-primary)' : 'var(--bg-surface)',
-                    color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
-                    fontSize: '13px',
-                    lineHeight: 1.5,
-                    whiteSpace: 'pre-wrap',
-                    border: m.role === 'assistant' ? '1px solid var(--border-default)' : 'none',
-                    boxShadow: m.role === 'assistant' ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
+                    padding: '8px 14px',
+                    background: 'var(--bg-elevated)',
+                    border: '1.5px solid var(--border-default)',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontFamily: "'Inter', sans-serif",
                   }}
                 >
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {busy && (
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                <div
+                  Send another
+                </button>
+                <button
+                  onClick={() => setOpen(false)}
                   style={{
-                    padding: '9px 13px',
-                    borderRadius: '12px',
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-default)',
-                    color: 'var(--text-muted)',
-                    fontSize: '13px',
+                    padding: '8px 14px',
+                    background: 'var(--accent-primary)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontFamily: "'Inter', sans-serif",
                   }}
                 >
-                  Thinking…
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={fieldLabel}>Header</label>
+                <input
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  maxLength={200}
+                  placeholder="Summarise your feedback"
+                  aria-label="Feedback header"
+                  style={fieldInput}
+                />
+              </div>
+              <div>
+                <label style={fieldLabel}>Comment</label>
+                <textarea
+                  value={body}
+                  onChange={e => setBody(e.target.value)}
+                  maxLength={5000}
+                  rows={5}
+                  placeholder="What's working, what's not, what would help?"
+                  aria-label="Feedback comment"
+                  style={{ ...fieldInput, resize: 'vertical', minHeight: '96px' }}
+                />
+              </div>
+              <div>
+                <label style={fieldLabel}>Page</label>
+                {/* Read-only by design: captured from where the user opened
+                    the widget — context the reviewer can trust. */}
+                <div
+                  aria-label="Page where this feedback was created"
+                  style={{
+                    ...fieldInput,
+                    background: 'var(--bg-input-disabled)',
+                    color: 'var(--text-secondary)',
+                    cursor: 'default',
+                    userSelect: 'none',
+                  }}
+                >
+                  📍 {capturedPage.label}
                 </div>
               </div>
-            )}
-            {error && (
-              <div
-                role="alert"
+              {error && (
+                <div role="alert" style={{ fontSize: '12px', color: '#DC2626', fontWeight: 600 }}>
+                  {error}
+                </div>
+              )}
+              <button
+                onClick={submit}
+                disabled={!title.trim() || !body.trim() || busy}
                 style={{
-                  background: 'rgba(220, 38, 38, 0.10)',
-                  color: '#B91C1C',
-                  padding: '8px 12px',
+                  padding: '10px',
+                  background:
+                    !title.trim() || !body.trim() || busy
+                      ? 'var(--bg-input-disabled)'
+                      : 'var(--accent-primary)',
+                  border: 'none',
                   borderRadius: '8px',
-                  fontSize: '12px',
-                  fontWeight: 700,
+                  color: !title.trim() || !body.trim() || busy ? 'var(--text-muted)' : '#fff',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  cursor: !title.trim() || !body.trim() || busy ? 'not-allowed' : 'pointer',
+                  fontFamily: "'Inter', sans-serif",
                 }}
               >
-                ⚠ {error}
-              </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              padding: '10px 12px',
-              background: 'var(--bg-surface)',
-              borderTop: '1px solid var(--border-default)',
-              display: 'flex',
-              gap: '8px',
-            }}
-          >
-            <textarea
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Type a question…"
-              aria-label="Type a question"
-              rows={1}
-              style={{
-                flex: 1,
-                padding: '9px 12px',
-                border: '1.5px solid var(--border-default)',
-                borderRadius: '8px',
-                fontSize: '13px',
-                fontFamily: "'Inter', sans-serif",
-                outline: 'none',
-                resize: 'none',
-                maxHeight: '120px',
-                background: 'var(--bg-input)',
-                color: 'var(--text-primary)',
-              }}
-            />
-            <button
-              onClick={send}
-              disabled={!draft.trim() || busy}
-              aria-label="Send message"
-              style={{
-                padding: '9px 14px',
-                background:
-                  !draft.trim() || busy ? 'var(--border-strong)' : 'var(--accent-primary)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px',
-                fontWeight: 700,
-                fontSize: '13px',
-                cursor: !draft.trim() || busy ? 'not-allowed' : 'pointer',
-              }}
-            >
-              Send
-            </button>
-          </div>
+                {busy ? 'Sending…' : 'Send feedback'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </>
@@ -13436,194 +13354,214 @@ function MaintenanceBanner() {
   );
 }
 
-// ─── Chat logs page (admin only) ──────────────────────────────────────────────
-function ChatLogsPage() {
-  const [version, setVersion] = useState(0);
-  useEffect(() => subscribeChat(() => setVersion(v => v + 1)), []);
-  const [active, setActive] = useState(null);
+// ─── Feedback inbox (admin only) ─────────────────────────────────────────────
+// Reviews platform feedback submitted through the floating bubble. Each entry
+// carries the page it was created from (read-only, captured client-side).
+function FeedbackAdminPage() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [confirmId, setConfirmId] = useState(null);
 
-  const sessions = useMemo(() => listChatSessions(), [version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = async () => {
+    setLoading(true);
+    setLoadError('');
+    const { data, error } = await feedbackApi.listFeedback();
+    if (error) setLoadError(error);
+    else setItems(data.feedback || []);
+    setLoading(false);
+  };
+  useEffect(() => {
+    if (API_ENABLED) load();
+    else setLoading(false);
+  }, []);
 
-  const fmtTs = iso =>
-    new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+  const toggleStatus = async item => {
+    const next = item.status === 'New' ? 'Reviewed' : 'New';
+    const { error } = await feedbackApi.setFeedbackStatus(item.id, next);
+    if (!error) setItems(prev => prev.map(f => (f.id === item.id ? { ...f, status: next } : f)));
+  };
+
+  const remove = async id => {
+    const { error } = await feedbackApi.deleteFeedback(id);
+    if (!error) setItems(prev => prev.filter(f => f.id !== id));
+    setConfirmId(null);
+  };
+
+  const newCount = items.filter(f => f.status === 'New').length;
 
   return (
     <div>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
-          Chat logs
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 900, color: 'var(--text-primary)' }}>
+          💡 Feedback
         </h1>
-        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-          Every user conversation with the TechOps assistant. Used to tune the bot and decide future
-          caps.
-        </div>
+        {newCount > 0 && (
+          <span
+            style={{
+              fontSize: '12px',
+              fontWeight: 800,
+              padding: '2px 10px',
+              borderRadius: '100px',
+              background: 'var(--accent-soft)',
+              color: 'var(--accent-primary)',
+            }}
+          >
+            {newCount} new
+          </span>
+        )}
       </div>
+      <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px' }}>
+        Platform feedback submitted through the bubble — with the page it came from.
+      </p>
 
-      {sessions.length === 0 ? (
-        <div
-          style={{
-            padding: '40px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-            background: 'var(--bg-surface)',
-            borderRadius: '12px',
-            border: '1px solid var(--border-default)',
-          }}
-        >
-          📭 No chat sessions yet. They'll appear here as users start chatting.
-        </div>
-      ) : (
-        <div
-          className="pomelo-audit-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 320px) 1fr',
-            gap: '16px',
-            alignItems: 'flex-start',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-surface)',
-              borderRadius: '12px',
-              border: '1px solid var(--border-default)',
-              overflow: 'hidden',
-              maxHeight: '70vh',
-              overflowY: 'auto',
-            }}
-          >
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-              {sessions.map(s => {
-                const isActive = active?.id === s.id;
-                return (
-                  <li key={s.id}>
-                    <button
-                      onClick={() => setActive(s)}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        border: 'none',
-                        borderTop: '1px solid var(--border-subtle)',
-                        background: isActive ? 'var(--accent-soft)' : 'var(--bg-surface)',
-                        padding: '12px 16px',
-                        cursor: 'pointer',
-                        fontFamily: "'Inter', sans-serif",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'baseline',
-                          gap: '8px',
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            fontSize: '13px',
-                            color: 'var(--text-primary)',
-                          }}
-                        >
-                          {s.userName}
-                        </span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                          {fmtTs(s.startedAt)}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: '12px',
-                          color: 'var(--text-secondary)',
-                          marginTop: '2px',
-                        }}
-                      >
-                        {s.messages.length} message{s.messages.length === 1 ? '' : 's'}
-                        {s.userRole === 'superadmin' ? ' · admin' : ''}
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          <div
-            style={{
-              background: 'var(--bg-surface)',
-              borderRadius: '12px',
-              border: '1px solid var(--border-default)',
-              padding: '18px',
-              minHeight: '320px',
-            }}
-          >
-            {active ? (
-              <>
-                <div
-                  style={{
-                    marginBottom: '14px',
-                    paddingBottom: '12px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
-                    {active.userName}{' '}
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 400 }}>
-                      · {active.userEmail || 'no email'}
-                    </span>
-                  </div>
-                  <div
-                    style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}
-                  >
-                    Started {fmtTs(active.startedAt)} · {active.messages.length} messages
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {active.messages.map((m, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: 'flex',
-                        justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
-                      }}
-                    >
-                      <div
-                        style={{
-                          maxWidth: '85%',
-                          padding: '9px 13px',
-                          borderRadius: '12px',
-                          background:
-                            m.role === 'user' ? 'var(--accent-primary)' : 'var(--bg-hover)',
-                          color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
-                          fontSize: '13px',
-                          whiteSpace: 'pre-wrap',
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {m.content}
-                        <div
-                          style={{
-                            fontSize: '10px',
-                            color:
-                              m.role === 'user' ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)',
-                            marginTop: '4px',
-                          }}
-                        >
-                          {fmtTs(m.ts)}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 0' }}>
-                Select a session on the left to read the conversation.
-              </div>
-            )}
-          </div>
+      {loading && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Loading feedback…</div>
+      )}
+      {loadError && (
+        <div role="alert" style={{ color: '#DC2626', fontSize: '13px', fontWeight: 600 }}>
+          {loadError}
         </div>
       )}
+      {!loading && !loadError && items.length === 0 && (
+        <div
+          style={{
+            padding: '48px',
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            fontSize: '14px',
+            background: 'var(--bg-surface)',
+            border: '1px dashed var(--border-default)',
+            borderRadius: '12px',
+          }}
+        >
+          📭 No feedback yet — it will appear here as users submit it.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {items.map(item => (
+          <div
+            key={item.id}
+            style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-default)',
+              borderLeft:
+                item.status === 'New'
+                  ? '4px solid var(--accent-primary)'
+                  : '4px solid var(--border-default)',
+              borderRadius: '10px',
+              padding: '14px 16px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                {item.title}
+              </span>
+              <span
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '100px',
+                  background: 'var(--accent-soft)',
+                  color: 'var(--accent-primary)',
+                }}
+              >
+                📍 {item.pageLabel || item.page}
+              </span>
+              <span
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '100px',
+                  background:
+                    item.status === 'New' ? 'rgba(245, 158, 11, 0.18)' : 'var(--bg-hover)',
+                  color: item.status === 'New' ? '#D97706' : 'var(--text-muted)',
+                }}
+              >
+                {item.status}
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-secondary)',
+                margin: '8px 0',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {item.body}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                fontSize: '11px',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <span>
+                {item.authorName} · {new Date(item.createdAt).toLocaleString()}
+              </span>
+              <span style={{ flex: 1 }} />
+              <button
+                onClick={() => toggleStatus(item)}
+                style={{
+                  padding: '5px 10px',
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontFamily: "'Inter', sans-serif",
+                }}
+              >
+                {item.status === 'New' ? '✓ Mark reviewed' : '↩ Mark new'}
+              </button>
+              {confirmId === item.id ? (
+                <button
+                  onClick={() => remove(item.id)}
+                  style={{
+                    padding: '5px 10px',
+                    background: '#DC2626',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontFamily: "'Inter', sans-serif",
+                  }}
+                >
+                  Confirm delete
+                </button>
+              ) : (
+                <button
+                  onClick={() => setConfirmId(item.id)}
+                  style={{
+                    padding: '5px 10px',
+                    background: 'transparent',
+                    border: '1px solid rgba(220, 38, 38, 0.4)',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#DC2626',
+                    cursor: 'pointer',
+                    fontFamily: "'Inter', sans-serif",
+                  }}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -13872,6 +13810,34 @@ function AuditLogPage() {
 }
 
 // ─── Resources dropdown (groups reference pages) ─────────────────────────────
+// Human-readable names for portal sections — shown in the feedback widget's
+// read-only "Page" field and carried into the admin Feedback inbox.
+const SECTION_LABELS = {
+  home: 'Home',
+  submit: 'Submit Ticket',
+  mytickets: 'My Tickets',
+  approvals: 'Approvals',
+  board: 'Board',
+  devportal: 'Developer Portal',
+  docs: 'Documentation',
+  suggestions: 'Suggestions',
+  priority: 'Priority Guide',
+  sla: 'SLA & Standards',
+  incidents: 'Incidents',
+  problems: 'Problems',
+  changes: 'Changes',
+  assets: 'Assets',
+  studio: 'Doc Studio',
+  admin: 'Admin Console',
+  'catalog-admin': 'Service Catalog',
+  'spaces-admin': 'Spaces & Boards',
+  reports: 'Reports',
+  roles: 'Roles & Access',
+  users: 'Users',
+  audit: 'Audit log',
+  feedback: 'Feedback',
+};
+
 const RESOURCE_ITEMS = [
   { id: 'docs', Icon: BookOpen, label: 'Documentation', hint: 'IT guides and how-tos' },
   {
@@ -14418,7 +14384,7 @@ const WIDE_SECTIONS = new Set([
   'admin',
   'users',
   'audit',
-  'chatlogs',
+  'feedback',
   'roles',
   'devportal',
   'board',
@@ -14451,7 +14417,7 @@ const VALID_SECTIONS = new Set([
   'roles',
   'users',
   'audit',
-  'chatlogs',
+  'feedback',
   'board',
   'catalog-admin',
   'spaces-admin',
@@ -14545,11 +14511,11 @@ const ADMIN_TOOLS = [
     cap: 'audit.view',
   },
   {
-    id: 'chatlogs',
+    id: 'feedback',
     Icon: MessageCircle,
-    label: 'Chat logs',
-    hint: 'AI assistant conversations',
-    cap: 'chatlogs.view',
+    label: 'Feedback',
+    hint: 'User-submitted platform feedback',
+    cap: 'feedback.view',
   },
 ];
 // ─── Admin View Mode pill ─────────────────────────────────────────────────────
@@ -15123,7 +15089,7 @@ function AppContent() {
       users: 'users.edit',
       roles: 'roles.edit',
       audit: 'audit.view',
-      chatlogs: 'chatlogs.view',
+      feedback: 'feedback.view',
       devportal: 'tickets.view_assigned',
       'catalog-admin': 'catalog.manage',
       'spaces-admin': 'spaces.manage',
@@ -15370,9 +15336,9 @@ function AppContent() {
           <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
         );
         break;
-      case 'chatlogs':
-        page = can('chatlogs.view') ? (
-          <ChatLogsPage />
+      case 'feedback':
+        page = can('feedback.view') ? (
+          <FeedbackAdminPage />
         ) : (
           <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
         );
@@ -15639,7 +15605,7 @@ function AppContent() {
                 can('users.edit') ||
                 can('roles.edit') ||
                 can('audit.view') ||
-                can('chatlogs.view')) && (
+                can('feedback.view')) && (
                 <AdminToolsDropdown section={section} onPick={setSection} />
               )}
 
@@ -15765,7 +15731,11 @@ function AppContent() {
             onLogout={handleLogout}
           />
         )}
-        <ChatAssistantWidget effectiveUser={effectiveUser} effectiveRole={effectiveRole} />
+        <FeedbackWidget
+          effectiveUser={effectiveUser}
+          section={section}
+          activeBoardKey={activeBoardKey}
+        />
         <GlobalSearchPalette
           open={searchOpen}
           onClose={() => setSearchOpen(false)}

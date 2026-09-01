@@ -5,8 +5,14 @@
 import { test, expect } from '@playwright/test';
 
 const BASE = 'http://localhost:5173';
-const ADMIN = { email: 'alex.lee@pomelo.com', password: 'Admin123!' };
-const USER = { email: 'kai.nguyen@pomelo.com', password: 'User123!' };
+const ADMIN = {
+  email: process.env.E2E_ADMIN_EMAIL || 'alex.lee@pomelo.com',
+  password: process.env.E2E_ADMIN_PASSWORD || 'Admin123!',
+};
+const USER = {
+  email: process.env.E2E_USER_EMAIL || 'kai.nguyen@pomelo.com',
+  password: process.env.E2E_USER_PASSWORD || 'User123!',
+};
 
 async function freshLogin(page, { email, password }) {
   await page.goto(BASE + '/');
@@ -43,7 +49,7 @@ test.describe('Admin view-mode pill', () => {
     await expect(page.locator('[role="menuitem"]:has-text("Admin Console")')).toBeVisible();
     await expect(page.locator('[role="menuitem"]:has-text("Users")')).toBeVisible();
     await expect(page.locator('[role="menuitem"]:has-text("Audit log")')).toBeVisible();
-    await expect(page.locator('[role="menuitem"]:has-text("Chat logs")')).toBeVisible();
+    await expect(page.locator('[role="menuitem"]:has-text("Feedback")')).toBeVisible();
   });
 
   test('regular user sees no view-mode pill and no admin tools', async ({ page }) => {
@@ -147,19 +153,19 @@ test.describe('Internal admin notes on tickets', () => {
   });
 });
 
-// ─── Chat widget ──────────────────────────────────────────────────────────────
+// ─── Feedback widget ──────────────────────────────────────────────────────────
 
-test.describe('Chat assistant widget', () => {
-  test('floating chat bubble is visible to a regular user', async ({ page }) => {
+test.describe('Feedback widget', () => {
+  test('floating feedback bubble is visible to a regular user', async ({ page }) => {
     await freshLogin(page, USER);
-    await expect(page.locator('button[aria-label="Open chat assistant"]')).toBeVisible();
+    await expect(page.locator('button[aria-label="Send feedback"]')).toBeVisible();
   });
 
-  test('floating chat bubble is visible to admin and expands on click', async ({ page }) => {
+  test('feedback bubble expands into the form on click', async ({ page }) => {
     await freshLogin(page, ADMIN);
-    await page.click('button[aria-label="Open chat assistant"]');
-    await expect(page.locator('text=TechOps Assistant')).toBeVisible();
-    await expect(page.locator('textarea[aria-label="Type a question"]')).toBeVisible();
+    await page.click('button[aria-label="Send feedback"]');
+    await expect(page.locator('text=Share feedback')).toBeVisible();
+    await expect(page.locator('textarea[aria-label="Feedback comment"]')).toBeVisible();
   });
 });
 

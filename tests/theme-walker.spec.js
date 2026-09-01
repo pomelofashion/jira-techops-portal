@@ -290,13 +290,13 @@ for (const theme of ['light', 'dark']) {
       await audit(page, 'Notification dropdown (user)', theme, 'user-bell');
     });
 
-    test(`chat assistant (${theme})`, async ({ page }) => {
+    test(`feedback widget (${theme})`, async ({ page }) => {
       test.setTimeout(45_000);
       await freshLogin(page, USER);
       await setTheme(page, theme);
-      await page.click('button[aria-label="Open chat assistant"]').catch(() => {});
+      await page.click('button[aria-label="Send feedback"]').catch(() => {});
       await page.waitForTimeout(400);
-      await audit(page, 'Chat assistant (user)', theme, 'user-chat');
+      await audit(page, 'Feedback widget (user)', theme, 'user-feedback');
     });
   });
 
@@ -350,18 +350,18 @@ for (const theme of ['light', 'dark']) {
       await audit(page, 'Audit log', theme, 'admin-audit');
     });
 
-    test(`chat logs (${theme})`, async ({ page }) => {
+    test(`feedback inbox (${theme})`, async ({ page }) => {
       test.setTimeout(45_000);
       await freshLogin(page, ADMIN);
       await setTheme(page, theme);
       await page.click('button[aria-label="Admin tools"]').catch(() => {});
       await page.waitForTimeout(200);
       await page
-        .locator('[role="menuitem"]:has-text("Chat logs")')
+        .locator('[role="menuitem"]:has-text("Feedback")')
         .click()
         .catch(() => {});
       await page.waitForTimeout(500);
-      await audit(page, 'Chat logs', theme, 'admin-chatlogs');
+      await audit(page, 'Feedback inbox', theme, 'admin-feedback');
     });
 
     test(`ticket with internal notes (${theme})`, async ({ page }) => {
