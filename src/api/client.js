@@ -10,7 +10,7 @@ export const USE_MOCK = false;
 
 export const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 15000,
+  timeout: 20000, // generous enough for Vercel cold starts
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,
 });

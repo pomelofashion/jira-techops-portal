@@ -20,7 +20,12 @@ const cookieSecure = process.env.COOKIE_SECURE
   ? process.env.COOKIE_SECURE === 'true'
   : isProduction;
 const SECRET = process.env.JWT_SECRET || '';
-const TOKEN_TTL = '7d';
+// Sliding 3-day sessions: requireAuth re-issues the token on activity (see
+// below), so this is "3 days since the last request", not since login.
+const TOKEN_TTL = '3d';
+const TOKEN_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+// Re-sign at most once an hour to keep Set-Cookie churn low.
+const TOKEN_REFRESH_AFTER_S = 60 * 60;
 
 if (process.env.DATABASE_URL && !SECRET) {
   // Fail loud: a DB-backed deployment without a signing secret is unsafe.
@@ -37,7 +42,7 @@ export function setAuthCookie(res, token) {
     httpOnly: true,
     secure: cookieSecure,
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: TOKEN_TTL_MS,
     path: '/',
   });
 }
@@ -114,16 +119,32 @@ export async function loadUserWithRole(userId) {
 
 // Express middleware: require a valid session. Attaches req.user.
 export async function requireAuth(req, res, next) {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (!token) return res.status(401).json({ error: 'Not authenticated.' });
+  let payload;
   try {
-    const token = req.cookies?.[COOKIE_NAME];
-    if (!token) return res.status(401).json({ error: 'Not authenticated.' });
-    const payload = jwt.verify(token, SECRET);
+    payload = jwt.verify(token, SECRET);
+  } catch {
+    // Missing/invalid/expired token — genuinely signed out.
+    return res.status(401).json({ error: 'Not authenticated.' });
+  }
+  try {
     const user = await loadUserWithRole(payload.sub);
     if (!user) return res.status(401).json({ error: 'Session no longer valid.' });
     req.user = user;
+    // Sliding expiry: activity re-issues the token (at most hourly), so the
+    // session only ends after TOKEN_TTL of idleness — never mid-work.
+    if (payload.iat && Date.now() / 1000 - payload.iat > TOKEN_REFRESH_AFTER_S) {
+      setAuthCookie(res, signSession(payload.sub));
+    }
     next();
-  } catch {
-    return res.status(401).json({ error: 'Not authenticated.' });
+  } catch (err) {
+    // A DB hiccup is NOT "logged out" — 503 tells the client to retry while
+    // the (still valid) cookie stays in place.
+    console.error(
+      JSON.stringify({ level: 'error', msg: 'auth lookup failed', error: err.message })
+    );
+    return res.status(503).json({ error: 'Service temporarily unavailable.' });
   }
 }
 

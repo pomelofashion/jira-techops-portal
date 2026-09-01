@@ -14702,6 +14702,9 @@ function AppContent() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // Tri-state session restore: 'checking' renders a splash (not the login
+  // page) so a slow/failed /auth/me never masquerades as a logout.
+  const [authStatus, setAuthStatus] = useState(API_ENABLED ? 'checking' : 'out');
   const [suggestions, setSuggestions] = useState([]);
   // Bumped whenever the roles registry or settings change so consumers
   // (and the `can` memo below) re-evaluate without prop drilling.
@@ -14762,26 +14765,50 @@ function AppContent() {
       setAuditActor({ name: u.name, email: u.email });
       if (!API_ENABLED) seedNotifications(buildSeedNotifications(u.name));
     };
+    // Live Jira project metadata — all fall back silently. Only loaded once a
+    // session exists (an anonymous visitor shouldn't generate API traffic).
+    const loadJiraMeta = () => {
+      loadJiraWorkflow();
+      loadAssignableUsers();
+      loadIssueTypes();
+      loadComponents();
+    };
     if (API_ENABLED) {
       // The session is an httpOnly cookie — ask the server who we are.
-      authApi.me().then(({ data: u }) => {
-        if (u) {
-          restore(u, u.role?.name || 'user');
-          hydrateFromBackend();
-        }
-      });
+      // A failed check (429/5xx/timeout/cold start) is NOT "logged out":
+      // retry with backoff; only a true 401 short-circuits to the login page.
+      const attempt = (tries = 0) => {
+        authApi.me().then(({ data: u, error }) => {
+          if (u) {
+            restore(u, u.role?.name || 'user');
+            setAuthStatus('in');
+            hydrateFromBackend();
+            loadJiraMeta();
+          } else if (!error) {
+            setAuthStatus('out'); // genuine 401 — signed out
+          } else if (tries < 3) {
+            setTimeout(() => attempt(tries + 1), [2000, 5000, 10000][tries]);
+          } else {
+            setAuthStatus('out');
+            setToast({
+              message: 'Could not reach the server to restore your session — please sign in.',
+              type: 'error',
+            });
+          }
+        });
+      };
+      attempt();
     } else {
       const session = getSession();
       // Back-fill roleId for sessions created before the RBAC migration
       // landed — derive from the legacy role string. Once the user logs in
       // again, the createSession write will carry roleId natively.
-      if (session) restore(session, session.role);
+      if (session) {
+        restore(session, session.role);
+        loadJiraMeta();
+      }
+      setAuthStatus('out');
     }
-    // Load the live Jira project metadata on boot — all fall back silently.
-    loadJiraWorkflow();
-    loadAssignableUsers();
-    loadIssueTypes();
-    loadComponents();
   }, [seedNotifications]);
 
   // Background Jira poll — runs while authenticated. Reconciles linked tickets
@@ -14797,7 +14824,7 @@ function AppContent() {
   // only returns events newer than `since`.
   useEffect(() => {
     if (!isAuthenticated) return;
-    const id = setInterval(() => pollWebhookEvents(), 5_000);
+    const id = setInterval(() => pollWebhookEvents(), 15_000);
     return () => clearInterval(id);
   }, [isAuthenticated]);
 
@@ -14810,6 +14837,7 @@ function AppContent() {
     setCurrentUser({ name: user.name, email: user.email, department: user.department, roleId });
     setRole(user.role);
     setIsAuthenticated(true);
+    setAuthStatus('in');
     setViewAs(null);
     hydrateFromBackend();
     setAuditActor({ name: user.name, email: user.email });
@@ -14825,6 +14853,7 @@ function AppContent() {
     if (API_ENABLED) authApi.logout(); // clears the httpOnly cookie server-side
     clearSession();
     setIsAuthenticated(false);
+    setAuthStatus('out');
     setCurrentUser(null);
     setRole('user');
     setViewAs(null);
@@ -15194,6 +15223,29 @@ function AppContent() {
   };
 
   if (!isAuthenticated) {
+    // Session restore in flight — show a splash, never a login-page flash
+    // that users read as "I was logged out".
+    if (API_ENABLED && authStatus === 'checking') {
+      return (
+        <>
+          <style>{THEME_TOKENS_CSS}</style>
+          <div
+            style={{
+              minHeight: '100vh',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--bg-page)',
+              color: 'var(--text-muted)',
+              fontFamily: "'Inter', sans-serif",
+              fontSize: '14px',
+            }}
+          >
+            Restoring your session…
+          </div>
+        </>
+      );
+    }
     return (
       <>
         <style>{THEME_TOKENS_CSS}</style>

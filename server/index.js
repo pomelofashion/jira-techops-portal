@@ -120,15 +120,21 @@ app.get('/api/health', async (_req, res) => {
   res.json({ status: 'ok', db: await dbHealth(), ts: new Date().toISOString() });
 });
 
-// Development gets a much higher ceiling: the SPA fans out on boot (roles,
-// users, tickets, notifications) and Playwright E2E runs several logins per
-// minute — 30/min trips constantly. Production keeps the strict limit.
+// The SPA is chatty by design — webhook/notification/Jira polling plus the
+// boot fan-out is ~15-25 req/min per tab, and office NATs share one IP — so
+// this is an abuse guard, not a quota. (The old 30/min production cap made
+// routine refreshes 429 and users read that as being logged out.) Note: the
+// default MemoryStore is per lambda instance on Vercel, so the effective
+// ceiling there is approximate.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: process.env.NODE_ENV === 'production' ? 30 : 600,
+  limit: process.env.NODE_ENV === 'production' ? 240 : 600,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests.' },
+  // The session check must never be rate-limited — a 429 on /auth/me looks
+  // exactly like a logout to the client.
+  skip: req => req.method === 'GET' && req.path === '/auth/me',
 });
 app.use('/api/', apiLimiter);
 
