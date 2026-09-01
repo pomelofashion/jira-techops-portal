@@ -2742,6 +2742,155 @@ function OtpInput({ value, onChange }) {
 }
 
 // ─── Login Page ───────────────────────────────────────────────────────────────
+// ─── Email-link actions (path deep links: /reset, /accept-invite) ─────────────
+// Rendered instead of the login page when the URL carries a token from a
+// transactional email. /verify needs no form and is consumed by the shell.
+function TokenActionPage({ link, onDone, onToast }) {
+  const isInvite = link.kind === 'accept-invite';
+  const [name, setName] = useState('');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async e => {
+    e.preventDefault();
+    setError('');
+    if (isInvite && !name.trim()) return setError('Please enter your name.');
+    if (pw.length < 8) return setError('Password must be at least 8 characters.');
+    if (pw !== pw2) return setError('Passwords do not match.');
+    setBusy(true);
+    const res = isInvite
+      ? await authApi.acceptInvite(link.token, name.trim(), pw)
+      : await authApi.resetPassword(link.token, pw);
+    setBusy(false);
+    if (res.error) return setError(res.error);
+    if (isInvite) {
+      onToast?.('Welcome aboard — your account is ready.');
+      onDone(res.data || null); // the server already opened the session
+    } else {
+      onToast?.('Password updated — sign in with your new password.');
+      onDone(null);
+    }
+  };
+
+  const field = {
+    width: '100%',
+    padding: '11px 14px',
+    borderRadius: '8px',
+    border: '1.5px solid var(--border-default)',
+    background: 'var(--bg-input)',
+    color: 'var(--text-primary)',
+    fontSize: '14px',
+    fontFamily: "'Inter', sans-serif",
+    boxSizing: 'border-box',
+  };
+  const label = {
+    display: 'block',
+    fontSize: '11px',
+    fontWeight: 700,
+    color: 'var(--text-secondary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginBottom: '6px',
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-page)',
+        fontFamily: "'Inter', sans-serif",
+        padding: '24px',
+      }}
+    >
+      <form
+        onSubmit={submit}
+        style={{
+          width: '100%',
+          maxWidth: '400px',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '14px',
+          padding: '28px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: '20px', fontWeight: 900, color: 'var(--text-primary)' }}>
+            {isInvite ? 'Accept your invite' : 'Set a new password'}
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            {isInvite
+              ? 'Finish setting up your TechOps Portal account.'
+              : 'Choose a new password for your TechOps Portal account.'}
+          </div>
+        </div>
+        {isInvite && (
+          <div>
+            <label style={label}>Your name</label>
+            <input value={name} onChange={e => setName(e.target.value)} style={field} autoFocus />
+          </div>
+        )}
+        <div>
+          <label style={label}>{isInvite ? 'Password' : 'New password'}</label>
+          <input
+            type="password"
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            style={field}
+            autoFocus={!isInvite}
+          />
+        </div>
+        <div>
+          <label style={label}>Confirm password</label>
+          <input type="password" value={pw2} onChange={e => setPw2(e.target.value)} style={field} />
+        </div>
+        {error && (
+          <div style={{ fontSize: '13px', color: '#DC2626', fontWeight: 600 }}>{error}</div>
+        )}
+        <button
+          type="submit"
+          disabled={busy}
+          style={{
+            padding: '12px',
+            borderRadius: '8px',
+            border: 'none',
+            background: 'var(--accent-primary)',
+            color: '#fff',
+            fontWeight: 800,
+            fontSize: '14px',
+            cursor: busy ? 'not-allowed' : 'pointer',
+            opacity: busy ? 0.6 : 1,
+            fontFamily: "'Inter', sans-serif",
+          }}
+        >
+          {busy ? 'Working…' : isInvite ? 'Create account' : 'Update password'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onDone(null)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--text-muted)',
+            fontSize: '12px',
+            cursor: 'pointer',
+            fontFamily: "'Inter', sans-serif",
+          }}
+        >
+          Back to sign in
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function LoginPage({ onLogin, onToast }) {
   const [view, setView] = useState('login');
   const [email, setEmail] = useState('');
@@ -14182,6 +14331,17 @@ const boardKeyFromHash = () => {
   return head === 'board' && key ? decodeURIComponent(key) : null;
 };
 
+// Transactional-email deep links use PATHS (not hashes): /verify,
+// /accept-invite and /reset all carry ?token=… . Captured once at boot; the
+// shell consumes the token and then normalises the URL back to /#home so a
+// refresh never replays it.
+const AUTH_LINK_KINDS = new Set(['verify', 'accept-invite', 'reset']);
+const authLinkFromLocation = () => {
+  const kind = window.location.pathname.replace(/^\/+|\/+$/g, '');
+  const token = new URLSearchParams(window.location.search).get('token');
+  return AUTH_LINK_KINDS.has(kind) && token ? { kind, token } : null;
+};
+
 const ADMIN_TOOLS = [
   {
     id: 'studio',
@@ -14519,6 +14679,25 @@ function AppContent() {
   const [toast, setToast] = useState(null);
   // Notification deep link: which ticket My Tickets should auto-open.
   const [pendingTicketKey, setPendingTicketKey] = useState(null);
+  // Email deep link (path-based): /verify, /reset, /accept-invite ?token=…
+  const [authLink, setAuthLink] = useState(authLinkFromLocation);
+
+  // Email verification: consume the token immediately (no form needed). This
+  // was the missing half of the signup flow — the CTA landed on the SPA and
+  // the token was never submitted, so email_verified never flipped.
+  useEffect(() => {
+    if (authLink?.kind !== 'verify') return;
+    authApi.verifyEmail(authLink.token).then(res => {
+      setToast(
+        res.error
+          ? { message: `Email verification failed: ${res.error}`, type: 'error' }
+          : { message: 'Email verified — you can sign in now.', type: 'success' }
+      );
+      window.history.replaceState({}, '', '/#home');
+      setAuthLink(null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [role, setRole] = useState('user');
   const [profileOpen, setProfileOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
@@ -15018,10 +15197,22 @@ function AppContent() {
     return (
       <>
         <style>{THEME_TOKENS_CSS}</style>
-        <LoginPage
-          onLogin={handleLogin}
-          onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
-        />
+        {authLink && authLink.kind !== 'verify' ? (
+          <TokenActionPage
+            link={authLink}
+            onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
+            onDone={user => {
+              window.history.replaceState({}, '', '/#home');
+              setAuthLink(null);
+              if (user) handleLogin({ ...user, role: user.role?.name || 'user' });
+            }}
+          />
+        ) : (
+          <LoginPage
+            onLogin={handleLogin}
+            onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
+          />
+        )}
         {/* Token-authenticated CSAT works pre-login (email deep link). */}
         {API_ENABLED && (
           <CsatPrompt
