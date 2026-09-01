@@ -14612,7 +14612,7 @@ const THEME_TOKENS_CSS = `
     --shadow-dropdown: 0 1px 3px rgba(15,15,18,0.06), 0 8px 24px rgba(15,15,18,0.10), 0 16px 40px rgba(15,15,18,0.06);
     --shadow-modal: 0 4px 12px rgba(15,15,18,0.08), 0 32px 80px rgba(15,15,18,0.15);
     --focus-ring: 0 0 0 3px rgba(99,102,241,0.18);
-    --bg-branded: var(--bg-branded);
+    --bg-branded: #111111;
     --bg-branded-2: #000000;
     --text-on-branded: #FFFFFF;
   }

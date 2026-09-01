@@ -143,6 +143,48 @@ async function snap(page, name) {
   await page.screenshot({ path: path.join(OUT_DIR, `${name}.png`), fullPage: false });
 }
 
+
+async function findWhiteOnWhiteInLight(page) {
+  return await page.evaluate(() => {
+    const out = [];
+    const parse = c => {
+      const m = (c || '').match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
+      if (!m) return null;
+      return { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] };
+    };
+    const isLight = c => c && c.a > 0.4 && c.r >= 225 && c.g >= 225 && c.b >= 225;
+    const effectiveBg = el => {
+      for (let n = el; n; n = n.parentElement) {
+        const cs = getComputedStyle(n);
+        // A gradient (background-image) hides the ancestor color — treat the
+        // background as unknown rather than falsely assuming the page white.
+        if (cs.backgroundImage && cs.backgroundImage !== 'none') return null;
+        const bg = parse(cs.backgroundColor);
+        if (bg && bg.a >= 0.5) return bg;
+      }
+      return { r: 255, g: 255, b: 255, a: 1 };
+    };
+    for (const el of document.querySelectorAll('body *')) {
+      if (out.length >= 8) break;
+      const hasText = Array.from(el.childNodes).some(
+        n => n.nodeType === 3 && n.textContent.trim().length > 2
+      );
+      if (!hasText) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 20 || r.height < 10 || r.bottom < 0 || r.top > innerHeight) continue;
+      const color = parse(getComputedStyle(el).color);
+      if (isLight(color) && isLight(effectiveBg(el))) {
+        out.push({
+          tag: el.tagName.toLowerCase(),
+          text: el.textContent.trim().slice(0, 60),
+          color: getComputedStyle(el).color,
+        });
+      }
+    }
+    return out;
+  });
+}
+
 async function audit(page, screen, theme, screenshotName) {
   await page.waitForTimeout(200);
   await snap(page, `${screenshotName}-${theme}`);
@@ -159,6 +201,17 @@ async function audit(page, screen, theme, screenshotName) {
         severity: 'P2',
         kind: 'light-pocket-in-dark',
         detail: pockets,
+      });
+    }
+  } else {
+    const ghosts = await findWhiteOnWhiteInLight(page);
+    if (ghosts.length) {
+      appendFinding({
+        screen,
+        theme,
+        severity: 'P2',
+        kind: 'white-on-white-in-light',
+        detail: ghosts,
       });
     }
   }
