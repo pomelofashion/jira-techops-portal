@@ -52,8 +52,15 @@ export const htmlToMd = html => {
         const alt = node.getAttribute('alt') || 'image';
         return src ? `\n![${alt}](${src})\n` : '';
       }
-      case 'table':
-        return `${children}\n`;
+      case 'table': {
+        // GitHub-flavored tables need a | --- | separator after the header
+        // row or renderers treat the rows as plain text.
+        const rows = children.split('\n').filter(l => l.trim().startsWith('|'));
+        if (!rows.length) return `${children}\n`;
+        const cols = Math.max(rows[0].split('|').length - 2, 1);
+        const sep = `| ${Array.from({ length: cols }, () => '---').join(' | ')} |`;
+        return [rows[0], sep, ...rows.slice(1)].join('\n') + '\n\n';
+      }
       case 'thead':
       case 'tbody':
       case 'tfoot':
@@ -61,7 +68,7 @@ export const htmlToMd = html => {
       case 'tr': {
         // Collect cells as a pipe-delimited row
         const cells = Array.from(node.children)
-          .map(cell => Array.from(cell.childNodes).map(walk).join('').trim())
+          .map(cell => Array.from(cell.childNodes).map(walk).join('').trim().replace(/\|/g, '\\|'))
           .join(' | ');
         return `| ${cells} |\n`;
       }

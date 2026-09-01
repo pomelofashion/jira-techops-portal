@@ -11,6 +11,7 @@
 // only needed for specific file types. See loadPdfJs() / loadMammoth() below.
 
 import { htmlToMd } from '../lib/htmlToMd.js';
+import { csvToMarkdown, xlsxToMarkdown } from '../lib/tableExtract.js';
 
 let pdfjsPromise;
 const loadPdfJs = () => {
@@ -137,12 +138,14 @@ const PDF_PROMPT =
   'Extract all content from this PDF and format it as clean Markdown. ' +
   'Use ## for main sections, ### for subsections, and - for bullet points. ' +
   'Use **bold** for key terms and important values. ' +
-  'Convert any tables into bullet lists. ' +
+  'Preserve tables as GitHub-flavored Markdown tables (header row, then a | --- | separator row). ' +
   'Output only the document content — no preamble, no commentary.';
 
 const TXT_PROMPT = text =>
   'Format this plain-text document as clean Markdown. ' +
-  'Identify sections and add ## headings. Use - for lists. Preserve all content:\n\n' +
+  'Identify sections and add ## headings. Use - for lists. ' +
+  'If the content is tabular (TSV or aligned columns), format it as a GitHub-flavored ' +
+  'Markdown table with a header row and | --- | separator. Preserve all content:\n\n' +
   text;
 
 const CSV_PROMPT = text =>
@@ -279,12 +282,20 @@ export const extractDocumentContent = async file => {
     return await callClaude([{ role: 'user', content: TXT_PROMPT(text) }]);
   }
 
-  // ── CSV: Claude summarises it ───────────────────────────────────────────────
+  // ── CSV: deterministic local table (no AI round-trip) ───────────────────────
   if (ext === 'csv') {
     const text = await readAsText(file);
+    const table = csvToMarkdown(text, file.name.replace(/\.[^.]+$/, ''));
+    if (table) return table;
     return await callClaude([{ role: 'user', content: CSV_PROMPT(text) }]);
   }
 
-  // XLSX, PPTX, PPT — not yet supported
+  // ── XLSX: parsed locally via jszip → one table per sheet ────────────────────
+  // null on parse failure → the caller's placeholder fallback applies.
+  if (ext === 'xlsx') {
+    return await xlsxToMarkdown(file);
+  }
+
+  // PPTX, PPT — not yet supported
   return null;
 };
