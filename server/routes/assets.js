@@ -186,8 +186,7 @@ router.get('/:id', requireCapability('assets.view'), async (req, res, next) => {
 router.post('/', requireCapability('assets.manage'), async (req, res, next) => {
   try {
     const parsed = baseSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const tag = await generateTag();
     const { rows } = await query(
@@ -217,8 +216,7 @@ router.post('/import', requireCapability('assets.manage'), async (req, res, next
   try {
     const schema = z.object({ assets: z.array(baseSchema).min(1).max(1000) }).strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     let created = 0;
     await withTransaction(async client => {
       for (const d of parsed.data.assets) {
@@ -259,8 +257,7 @@ router.patch('/:id', requireCapability('assets.manage'), async (req, res, next) 
       .extend({ status: z.enum(STATUSES).optional() })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const cur = await query('SELECT * FROM assets WHERE id=$1', [req.params.id]);
     if (!cur.rows.length) return res.status(404).json({ error: 'Asset not found.' });
@@ -268,11 +265,9 @@ router.patch('/:id', requireCapability('assets.manage'), async (req, res, next) 
 
     if (d.status && d.status !== asset.status) {
       if (!TRANSITIONS[asset.status].includes(d.status))
-        return res
-          .status(400)
-          .json({
-            error: `Cannot move ${asset.status} → ${d.status}. Use assign/return for assignment.`,
-          });
+        return res.status(400).json({
+          error: `Cannot move ${asset.status} → ${d.status}. Use assign/return for assignment.`,
+        });
     }
 
     const sets = [];

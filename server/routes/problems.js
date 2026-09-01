@@ -136,8 +136,7 @@ const createSchema = z
 router.post('/', requireCapability('problems.manage'), async (req, res, next) => {
   try {
     const parsed = createSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const key = await generateKey('PRB');
     const boardId = await defaultBoardId(); // problem board routing is future work
@@ -244,8 +243,7 @@ router.patch('/:id', requireCapability('problems.manage'), async (req, res, next
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const cur = await query(`SELECT * FROM tickets WHERE id=$1 AND record_type='problem'`, [
       req.params.id,

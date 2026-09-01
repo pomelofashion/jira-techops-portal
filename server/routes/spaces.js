@@ -126,8 +126,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', requireCapability('spaces.manage'), async (req, res, next) => {
   try {
     const parsed = spaceSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const base =
       d.name
@@ -150,8 +149,7 @@ router.post('/', requireCapability('spaces.manage'), async (req, res, next) => {
 router.patch('/:id', requireCapability('spaces.manage'), async (req, res, next) => {
   try {
     const parsed = spaceSchema.partial().safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const sets = [];
     const params = [];
@@ -186,8 +184,7 @@ router.post('/:id/boards', async (req, res, next) => {
     if (!isSpaceAdmin(req.user, req.params.id))
       return res.status(403).json({ error: 'Insufficient permissions.' });
     const parsed = boardCreateSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const space = await query('SELECT * FROM spaces WHERE id=$1 AND archived=FALSE', [
       req.params.id,
@@ -228,8 +225,7 @@ router.patch('/:id/boards/:boardId', async (req, res, next) => {
     if (!isBoardAdmin(req.user, cur.rows[0]))
       return res.status(403).json({ error: 'Insufficient permissions.' });
     const parsed = boardPatchSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const sets = [];
     const params = [];

@@ -93,8 +93,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', requireCapability('catalog.manage'), async (req, res, next) => {
   try {
     const parsed = baseSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     if (!fieldIdsValid(d.fields))
       return res.status(400).json({ error: 'Field ids must be unique.' });
@@ -135,8 +134,7 @@ router.post('/', requireCapability('catalog.manage'), async (req, res, next) => 
 router.patch('/:id', requireCapability('catalog.manage'), async (req, res, next) => {
   try {
     const parsed = baseSchema.partial().safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     if (d.fields && !fieldIdsValid(d.fields))
       return res.status(400).json({ error: 'Field ids must be unique.' });

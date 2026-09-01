@@ -65,7 +65,7 @@ test.describe('Docs any-format upload', () => {
 
     // The reader shows the original-file download card, and the served file
     // is reachable through the session (200 with the right content type).
-    await expect(page.locator('text=Original file')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Original file', { exact: true })).toBeVisible({ timeout: 10_000 });
     const link = page.locator('a[href*="/api/docs/"][href$="/file"]').first();
     const href = await link.getAttribute('href');
     const res = await page.request.get(href);

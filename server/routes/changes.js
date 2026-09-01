@@ -161,8 +161,7 @@ function windowValid(d) {
 router.post('/', requireCapability('changes.manage'), async (req, res, next) => {
   try {
     const parsed = baseSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const windowProblem = windowValid(d);
     if (windowProblem) return res.status(400).json({ error: windowProblem });
@@ -215,8 +214,7 @@ router.patch('/:id', requireCapability('changes.manage'), async (req, res, next)
       .extend({ status: z.enum(CHANGE_STATUSES).optional() })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const cur = await query(`${CHANGE_JOIN} WHERE t.id = $1 AND t.record_type = 'change'`, [
       req.params.id,

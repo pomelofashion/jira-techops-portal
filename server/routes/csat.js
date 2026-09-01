@@ -41,8 +41,7 @@ router.post('/respond', async (req, res, next) => {
       .strict()
       .refine(d => d.token || d.ticketId, { message: 'token or ticketId required' });
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
 
     let row = null;

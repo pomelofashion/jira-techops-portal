@@ -45,8 +45,7 @@ router.post('/', requireCapability('roles.create'), async (req, res, next) => {
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     // Derive a stable machine id/name from the label.
     const base =
@@ -78,8 +77,7 @@ router.patch('/:id', requireCapability('roles.edit'), async (req, res, next) => 
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
 
     const cur = await query('SELECT * FROM roles WHERE id=$1', [req.params.id]);

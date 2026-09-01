@@ -115,7 +115,7 @@ test.describe('Documentation Studio', () => {
     await page.click('button:has-text("Save")');
 
     // Appears in the sidebar list
-    await expect(page.locator('aside button:has-text("QA Signoff HowTo")')).toBeVisible({
+    await expect(page.locator('aside button:has-text("QA Signoff HowTo")').first()).toBeVisible({
       timeout: 8000,
     });
 

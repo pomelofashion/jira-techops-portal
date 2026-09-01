@@ -211,7 +211,6 @@ const exportTXT = doc => {
 
 const exportCSV = doc => {
   const headers = [
-    'id',
     'title',
     'category',
     'format',
@@ -224,7 +223,6 @@ const exportCSV = doc => {
     'updatedAt',
   ];
   const row = [
-    doc.id,
     doc.title,
     doc.category,
     doc.format,

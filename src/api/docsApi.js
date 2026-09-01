@@ -5,6 +5,8 @@
 import { MOCK_DOCS } from '../mocks/docsMockData.js';
 import { extractDocumentContent } from './claudeApi.js';
 import { api, USE_MOCK, wrap, simulateDelay, errorMessage } from './client.js';
+import { scrubImageFile } from '../lib/imageUtil.js';
+import { scrubOfficeFile } from '../lib/scrubOfficeMeta.js';
 
 // ─── In-memory mock store (mutated on upload/update/delete) ───────────────────
 let mockStore = [...MOCK_DOCS];
@@ -166,9 +168,7 @@ const buildDocFromFile = async item => {
   const title = item.title || item.file.name.replace(/\.[^.]+$/, '');
   const isImageFormat = IMAGE_EXTS.has(format);
 
-  let extractionError = null;
   let content = await extractDocumentContent(item.file).catch(err => {
-    extractionError = err;
     // KEY_MISSING may carry pdfjs-extracted text as a fallback
     return err.fallbackContent || null;
   });
@@ -189,14 +189,9 @@ const buildDocFromFile = async item => {
           month: 'long',
           year: 'numeric',
         });
-        let claudeNote;
-        if (extractionError?.code === 'KEY_MISSING') {
-          claudeNote = `\n> 💡 **AI formatting unavailable.** Add \`ANTHROPIC_API_KEY=sk-ant-...\` to \`.env.local\` for better extraction. Raw text shown above.`;
-        } else if (extractionError?.code === 'BFF_DOWN') {
-          claudeNote = `\n> 💡 **BFF proxy is not running.** Start both servers with \`npm run dev:all\` for AI-enhanced extraction.`;
-        } else {
-          claudeNote = `\n> ⚠️ Content extraction was attempted but did not succeed for this file. Download to view the original.`;
-        }
+        // Deliberately neutral — internal tooling/config names must never
+        // leak into user-visible document content.
+        const claudeNote = `\n> ⚠️ Content could not be extracted automatically — download the original file below.`;
         content =
           `# ${title}\n\n` +
           claudeNote +
@@ -311,7 +306,12 @@ export const uploadDocs = async (fileMetaList, onProgress) => {
       }
       const built = await buildDocFromFile(item);
       const { isImageFormat: _unused, ...fields } = built;
-      const sourceFile = await fileToSource(item.file, API_SOURCE_FILE_LIMIT);
+      // Privacy: strip embedded metadata before the original is stored —
+      // images are re-encoded (EXIF/GPS gone), Office files get their
+      // docProps author/company blanked. PDFs pass through (no safe
+      // dependency-free scrubber; documented limitation).
+      const cleanFile = await scrubOfficeFile(await scrubImageFile(item.file));
+      const sourceFile = await fileToSource(cleanFile, API_SOURCE_FILE_LIMIT);
       sendable.push({
         index: i,
         payload: { ...fields, ...(item.author ? { author: item.author } : {}), sourceFile },

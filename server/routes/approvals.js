@@ -129,8 +129,7 @@ router.post('/', async (req, res, next) => {
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const t = await query('SELECT id FROM tickets WHERE id=$1', [parsed.data.subjectId]);
     if (!t.rows.length) return res.status(404).json({ error: 'Subject ticket not found.' });
     const created = await createApproval({
@@ -157,8 +156,7 @@ router.post('/:id/decide', async (req, res, next) => {
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
 
     const cur = await query(
       `SELECT a.*, t.key AS ticket_key, t.title AS ticket_title, t.requester_email

@@ -45,8 +45,7 @@ const name = z.string().min(1).max(120);
 
 const validate = schema => (req, res, next) => {
   const parsed = schema.safeParse(req.body);
-  if (!parsed.success)
-    return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
   req.valid = parsed.data;
   next();
 };

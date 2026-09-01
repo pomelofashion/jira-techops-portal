@@ -202,8 +202,7 @@ const decodeDataUrl = dataUrl => {
 router.post('/upload', requireCapability('docs.manage'), async (req, res, next) => {
   try {
     const parsed = uploadSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
 
     // Per-doc outcomes: one bad file must not sink the rest of the batch.
     // Each doc gets its own transaction; the response reports every result
@@ -322,8 +321,7 @@ router.get('/:id/file', async (req, res, next) => {
 router.post('/', requireCapability('docs.manage'), async (req, res, next) => {
   try {
     const parsed = writeSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const { rows } = await query(
       `INSERT INTO docs (title, content, category, visibility, description, icon, tags, author, status, version)
@@ -361,8 +359,7 @@ const updateSchema = writeSchema
 router.put('/:id', requireCapability('docs.manage'), async (req, res, next) => {
   try {
     const parsed = updateSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const cur = await query('SELECT id FROM docs WHERE id=$1', [req.params.id]);
     if (!cur.rows.length) return res.status(404).json({ error: 'Document not found.' });

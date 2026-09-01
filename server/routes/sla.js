@@ -58,8 +58,7 @@ router.put('/policies', requireCapability('sla.manage'), async (req, res, next) 
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     for (const p of parsed.data.policies) {
       if (p.resolutionMinutes < p.responseMinutes)
         return res

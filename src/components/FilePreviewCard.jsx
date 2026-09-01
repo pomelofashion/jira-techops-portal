@@ -18,6 +18,7 @@ import {
   FileType,
   X,
 } from 'lucide-react';
+import { scrubImageFile } from '../lib/imageUtil.js';
 
 export const FILE_CATEGORIES = {
   image: { Icon: ImageIcon, color: 'var(--accent-primary)', label: 'Image', inline: true },
@@ -85,8 +86,10 @@ export const fmtFileSize = bytes => {
 };
 
 // Convert a File into a persistable attachment record. Files larger than the
-// data-URL limit keep only metadata (preview unavailable).
-export const fileToAttachment = async file => {
+// data-URL limit keep only metadata (preview unavailable). Images are
+// re-encoded first so EXIF/GPS data never reaches storage.
+export const fileToAttachment = async rawFile => {
+  const file = await scrubImageFile(rawFile);
   const meta = {
     name: file.name,
     type: file.type || 'application/octet-stream',

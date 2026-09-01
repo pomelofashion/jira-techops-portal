@@ -487,8 +487,7 @@ function validateFormValues(fields, values) {
 router.post('/', async (req, res, next) => {
   try {
     const parsed = createSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     // Setting an assignee at creation is the same privilege as assigning later
     // (the /:id/assign route already enforces it).
@@ -665,8 +664,7 @@ const patchSchema = z
 router.patch('/:id', async (req, res, next) => {
   try {
     const parsed = patchSchema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const { ticket, notFound, forbidden } = await loadVisible(req, req.params.id);
     if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
     if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });

@@ -36,6 +36,33 @@ const drawToDataUrl = (img, maxWidth, quality) => {
 };
 
 /**
+ * Re-encode an image through a canvas at full resolution — drops every byte
+ * of embedded metadata (EXIF/GPS, camera model, XMP) because the canvas only
+ * carries pixels. PNG stays lossless; JPEG/WebP re-encode at q=0.92. GIFs
+ * pass through (re-encoding would destroy animation), as do non-images.
+ * Never throws — any failure returns the original file.
+ */
+export const scrubImageFile = async file => {
+  const type = (file.type || '').toLowerCase();
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) return file;
+  try {
+    const dataUrl = await readAsDataUrl(file);
+    const img = await loadImage(dataUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    const blob = await new Promise(resolve =>
+      canvas.toBlob(resolve, type, type === 'image/png' ? undefined : 0.92)
+    );
+    if (!blob) return file;
+    return new File([blob], file.name, { type, lastModified: Date.now() });
+  } catch {
+    return file;
+  }
+};
+
+/**
  * Compress an image File into a JPEG data URL suitable for inlining into
  * Markdown. Tries {maxWidth, quality}, then a smaller retry when the result
  * is still heavy; returns the smallest candidate.

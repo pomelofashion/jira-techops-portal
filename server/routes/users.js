@@ -48,8 +48,7 @@ router.post('/', requireCapability('users.create'), async (req, res, next) => {
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
     const email = d.email.trim().toLowerCase();
 
@@ -86,8 +85,7 @@ router.patch('/:id', async (req, res, next) => {
       })
       .strict();
     const parsed = schema.safeParse(req.body);
-    if (!parsed.success)
-      return res.status(400).json({ error: 'Invalid input.', details: parsed.error.flatten() });
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
     const d = parsed.data;
 
     const cur = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
