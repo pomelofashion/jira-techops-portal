@@ -12,16 +12,41 @@ import { DOC_CATEGORIES } from '../../mocks/docsMockData.js';
 import {
   bulkArchive,
   updateDoc,
+  snapshotDoc,
   pinDoc,
   markNeedsReview,
   clearReview,
   restoreDoc,
 } from '../../api/docsApi.js';
-import DocEditModal from './DocEditModal.jsx';
 import FilePreviewCard from '../FilePreviewCard.jsx';
-import { MarkdownView } from './MarkdownView.jsx';
+import { MarkdownView, extractHeadings } from './MarkdownView.jsx';
+import RichTextarea from './studio/RichTextarea.jsx';
 
 const VISIBILITY_OPTIONS = ['Public', 'IT Team Only'];
+
+// Icon choices for the inline editor (moved from the retired DocEditModal).
+const ICON_OPTIONS = [
+  '📄',
+  '📝',
+  '⬇️',
+  '📃',
+  '📊',
+  '📈',
+  '📑',
+  '🔒',
+  '🛡️',
+  '💻',
+  '🖥️',
+  '☁️',
+  '🔐',
+  '💬',
+  '📋',
+  '📡',
+  '🏷️',
+  '🚀',
+  '📂',
+  '📌',
+];
 
 // ─── Skeleton Card ─────────────────────────────────────────────────────────────
 function SkeletonCard() {
@@ -250,7 +275,7 @@ function CmdPalette({ docs, onSelectDoc, onAction, onClose: _onClose }) {
                   gap: '12px',
                   padding: '10px 18px',
                   cursor: 'pointer',
-                  background: cursor === idx ? '#FFF4EE' : 'transparent',
+                  background: cursor === idx ? 'rgba(234, 88, 12, 0.10)' : 'transparent',
                   transition: 'background 0.1s',
                 }}
                 onMouseEnter={() => setCursor(idx)}
@@ -294,7 +319,7 @@ function CmdPalette({ docs, onSelectDoc, onAction, onClose: _onClose }) {
                     gap: '12px',
                     padding: '10px 18px',
                     cursor: 'pointer',
-                    background: cursor === globalIdx ? '#FFF4EE' : 'transparent',
+                    background: cursor === globalIdx ? 'rgba(234, 88, 12, 0.10)' : 'transparent',
                     transition: 'background 0.1s',
                   }}
                   onMouseEnter={() => setCursor(globalIdx)}
@@ -420,10 +445,318 @@ function UploaderModal({ manager, onClose, currentUser }) {
 }
 
 // ─── Full-page article reader ──────────────────────────────────────────────────
-function DocFullPage({ doc, allDocs, onClose, onSelect }) {
+// ─── Inline editor ─────────────────────────────────────────────────────────────
+// Replaces the old DocEditModal popup: editing happens directly on the
+// full-page reader. Content uses the Studio's RichTextarea (slash menu,
+// toolbar, table blocks); a snapshot is taken before each save so inline
+// edits get version history like the Studio.
+function DocInlineEditor({ doc, onCancel, onSaved }) {
+  const [form, setForm] = useState({
+    title: doc.title || '',
+    description: doc.description || '',
+    category: doc.category || 'Other',
+    tags: (doc.tags || []).join(', '),
+    author: doc.author || '',
+    visibility: doc.visibility || 'Public',
+    icon: doc.icon || '📄',
+    content: doc.content || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState(false);
+  const [showIconPicker, setShowIconPicker] = useState(false);
+  const taRef = useRef(null);
+
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const handleSave = async () => {
+    if (!form.title.trim()) {
+      setError('Title is required.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    await snapshotDoc(doc.id, form.author || doc.author || 'Unknown');
+    const updates = {
+      ...form,
+      tags: form.tags
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean),
+    };
+    const { error: apiError } = await updateDoc(doc.id, updates);
+    setSaving(false);
+    if (apiError) {
+      setError(apiError);
+      return;
+    }
+    onSaved(updates);
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '9px 12px',
+    borderRadius: '8px',
+    border: '1.5px solid var(--border-default)',
+    fontSize: '13px',
+    fontFamily: "'Inter', sans-serif",
+    background: 'var(--bg-input)',
+    color: 'var(--text-primary)',
+    outline: 'none',
+    boxSizing: 'border-box',
+  };
+  const labelStyle = {
+    display: 'block',
+    fontSize: '11px',
+    fontWeight: 700,
+    color: 'var(--text-secondary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginBottom: '5px',
+  };
+  const modeBtn = active => ({
+    padding: '6px 14px',
+    border: 'none',
+    borderRadius: '6px',
+    background: active ? 'var(--bg-elevated)' : 'transparent',
+    color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+    fontSize: '12px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: "'Inter', sans-serif",
+    boxShadow: active ? 'var(--shadow-card)' : 'none',
+  });
+
+  return (
+    <div>
+      {/* Title row: icon picker + title + save/cancel */}
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowIconPicker(v => !v)}
+            aria-label="Choose icon"
+            style={{
+              fontSize: '24px',
+              padding: '8px 10px',
+              background: 'var(--bg-elevated)',
+              border: '1.5px solid var(--border-default)',
+              borderRadius: '10px',
+              cursor: 'pointer',
+            }}
+          >
+            {form.icon}
+          </button>
+          {showIconPicker && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                left: 0,
+                zIndex: 30,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(5, 1fr)',
+                gap: '4px',
+                padding: '10px',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-default)',
+                borderRadius: '10px',
+                boxShadow: 'var(--shadow-dropdown)',
+              }}
+            >
+              {ICON_OPTIONS.map(ic => (
+                <button
+                  key={ic}
+                  onClick={() => {
+                    setForm(f => ({ ...f, icon: ic }));
+                    setShowIconPicker(false);
+                  }}
+                  style={{
+                    fontSize: '20px',
+                    padding: '6px',
+                    background: ic === form.icon ? 'var(--accent-soft)' : 'transparent',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {ic}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <input
+          value={form.title}
+          onChange={set('title')}
+          placeholder="Document title"
+          aria-label="Document title"
+          style={{ ...inputStyle, fontSize: '20px', fontWeight: 800, flex: 1 }}
+        />
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          style={{
+            padding: '9px 16px',
+            background: 'var(--bg-elevated)',
+            color: 'var(--text-secondary)',
+            border: '1.5px solid var(--border-default)',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            fontFamily: "'Inter', sans-serif",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            padding: '9px 18px',
+            background: 'var(--accent-primary)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: 700,
+            cursor: saving ? 'wait' : 'pointer',
+            opacity: saving ? 0.7 : 1,
+            fontFamily: "'Inter', sans-serif",
+          }}
+        >
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+
+      {error && (
+        <div
+          style={{
+            padding: '8px 12px',
+            marginBottom: '12px',
+            borderRadius: '8px',
+            background: 'rgba(220, 38, 38, 0.1)',
+            border: '1px solid rgba(220, 38, 38, 0.35)',
+            color: '#DC2626',
+            fontSize: '12px',
+            fontWeight: 600,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Meta strip */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '2fr 1fr 1fr',
+          gap: '12px',
+          marginBottom: '12px',
+        }}
+      >
+        <div>
+          <label style={labelStyle}>Description</label>
+          <input
+            value={form.description}
+            onChange={set('description')}
+            placeholder="One-line summary"
+            style={inputStyle}
+          />
+        </div>
+        <div>
+          <label style={labelStyle}>Category</label>
+          <select value={form.category} onChange={set('category')} style={inputStyle}>
+            {DOC_CATEGORIES.filter(c => c !== 'All').map(c => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Visibility</label>
+          <select value={form.visibility} onChange={set('visibility')} style={inputStyle}>
+            {VISIBILITY_OPTIONS.map(v => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '2fr 1fr',
+          gap: '12px',
+          marginBottom: '16px',
+        }}
+      >
+        <div>
+          <label style={labelStyle}>Tags (comma-separated)</label>
+          <input
+            value={form.tags}
+            onChange={set('tags')}
+            placeholder="network, vpn, onboarding"
+            style={inputStyle}
+          />
+        </div>
+        <div>
+          <label style={labelStyle}>Author</label>
+          <input value={form.author} onChange={set('author')} style={inputStyle} />
+        </div>
+      </div>
+
+      {/* Write / Preview toggle */}
+      <div
+        style={{
+          display: 'inline-flex',
+          gap: '2px',
+          padding: '3px',
+          background: 'var(--bg-hover)',
+          borderRadius: '8px',
+          marginBottom: '10px',
+        }}
+      >
+        <button onClick={() => setPreview(false)} style={modeBtn(!preview)}>
+          ✍️ Write
+        </button>
+        <button onClick={() => setPreview(true)} style={modeBtn(preview)}>
+          👁 Preview
+        </button>
+      </div>
+
+      {preview ? (
+        <div
+          style={{
+            border: '1.5px solid var(--border-default)',
+            borderRadius: '10px',
+            padding: '20px 24px',
+            minHeight: '420px',
+            background: 'var(--bg-surface)',
+          }}
+        >
+          <MarkdownView content={form.content} />
+        </div>
+      ) : (
+        <RichTextarea
+          taRef={taRef}
+          value={form.content}
+          onChange={v => setForm(f => ({ ...f, content: v }))}
+          placeholder={'Write your documentation in Markdown…\n\nType / for blocks.'}
+          style={{ minHeight: '420px' }}
+        />
+      )}
+    </div>
+  );
+}
+
+function DocFullPage({ doc, allDocs, onClose, onSelect, canEdit, startInEdit, onSaved }) {
   const otherDocs = allDocs.filter(d => d.id !== doc.id);
   const [scrollPct, setScrollPct] = useState(0);
   const [heroImageFailed, setHeroImageFailed] = useState(false);
+  const [editing, setEditing] = useState(Boolean(startInEdit && canEdit));
   const contentRef = useRef(null);
 
   const wordCount = (doc.content || '').split(/\s+/).filter(Boolean).length;
@@ -435,12 +768,8 @@ function DocFullPage({ doc, allDocs, onClose, onSelect }) {
     setScrollPct(Math.min(100, pct || 0));
   };
 
-  const tocItems = (doc.content || '').split('\n').reduce((acc, line, idx) => {
-    if (/^##\s/.test(line)) acc.push({ level: 2, text: line.replace(/^##\s/, ''), id: `h-${idx}` });
-    if (/^###\s/.test(line))
-      acc.push({ level: 3, text: line.replace(/^###\s/, ''), id: `h-${idx}` });
-    return acc;
-  }, []);
+  // Slug ids from MarkdownView so TOC anchors match the rendered headings.
+  const tocItems = extractHeadings(doc.content).filter(h => h.level === 2 || h.level === 3);
 
   const [sidebarTab, setSidebarTab] = useState(tocItems.length > 0 ? 'toc' : 'docs');
 
@@ -627,206 +956,247 @@ function DocFullPage({ doc, allDocs, onClose, onSelect }) {
           />
         </div>
 
-        <div style={{ padding: '36px 40px', maxWidth: '780px' }}>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
-            <span
-              style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                padding: '3px 10px',
-                borderRadius: '100px',
-                background: 'var(--bg-hover)',
-                color: 'var(--text-secondary)',
+        <div style={{ padding: '36px 40px', maxWidth: editing ? '980px' : '780px' }}>
+          {editing ? (
+            <DocInlineEditor
+              doc={doc}
+              onCancel={() => setEditing(false)}
+              onSaved={updates => {
+                setEditing(false);
+                onSaved?.(updates);
               }}
-            >
-              {doc.category}
-            </span>
-            {doc.version && (
-              <span
+            />
+          ) : (
+            <>
+              <div
+                style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}
+              >
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '3px 10px',
+                    borderRadius: '100px',
+                    background: 'var(--bg-hover)',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  {doc.category}
+                </span>
+                {doc.version && (
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: '4px',
+                      background: 'rgba(59, 130, 246, 0.12)',
+                      color: '#2563EB',
+                      border: '1px solid #BFDBFE',
+                    }}
+                  >
+                    v{doc.version}
+                  </span>
+                )}
+                {canEdit && (
+                  <button
+                    onClick={() => setEditing(true)}
+                    aria-label="Edit document"
+                    style={{
+                      marginLeft: 'auto',
+                      padding: '6px 14px',
+                      background: 'var(--accent-primary)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontFamily: "'Inter', sans-serif",
+                    }}
+                  >
+                    ✏️ Edit
+                  </button>
+                )}
+              </div>
+              <h1
                 style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  padding: '2px 7px',
-                  borderRadius: '4px',
-                  background: '#EFF6FF',
-                  color: '#2563EB',
-                  border: '1px solid #BFDBFE',
+                  fontSize: '30px',
+                  fontWeight: 900,
+                  color: 'var(--text-primary)',
+                  marginBottom: '8px',
+                  lineHeight: 1.2,
                 }}
               >
-                v{doc.version}
-              </span>
-            )}
-          </div>
-          <h1
-            style={{
-              fontSize: '30px',
-              fontWeight: 900,
-              color: 'var(--text-primary)',
-              marginBottom: '8px',
-              lineHeight: 1.2,
-            }}
-          >
-            {doc.icon} {doc.title}
-          </h1>
-          <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-            {doc.author && `By ${doc.author}`}
-            {doc.author && doc.updatedAt && ' · '}
-            {doc.updatedAt &&
-              `Updated ${new Date(doc.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`}
-          </div>
-          {/* Reading time + scroll progress badge */}
-          <div
-            style={{
-              display: 'flex',
-              gap: '8px',
-              alignItems: 'center',
-              marginTop: '6px',
-              marginBottom: '20px',
-            }}
-          >
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-              📖 {readingTime} min read
-            </span>
-            {scrollPct > 5 && (
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                · {scrollPct}% read
-              </span>
-            )}
-          </div>
-          {/* Source-file preview — admins/users can click to open the original
-              file in a new browser tab. Hidden when no source was captured. */}
-          {doc.sourceFile && (
-            <div style={{ marginBottom: '20px' }}>
+                {doc.icon} {doc.title}
+              </h1>
+              <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                {doc.author && `By ${doc.author}`}
+                {doc.author && doc.updatedAt && ' · '}
+                {doc.updatedAt &&
+                  `Updated ${new Date(doc.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`}
+              </div>
+              {/* Reading time + scroll progress badge */}
               <div
                 style={{
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  color: 'var(--text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  marginBottom: '8px',
+                  display: 'flex',
+                  gap: '8px',
+                  alignItems: 'center',
+                  marginTop: '6px',
+                  marginBottom: '20px',
                 }}
               >
-                Original file
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  📖 {readingTime} min read
+                </span>
+                {scrollPct > 5 && (
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    · {scrollPct}% read
+                  </span>
+                )}
               </div>
-              <FilePreviewCard
-                name={doc.sourceFile.name}
-                size={doc.sourceFile.size}
-                type={doc.sourceFile.type}
-                src={doc.sourceFile.dataUrl}
-              />
-            </div>
-          )}
-          <div style={{ borderBottom: '2px solid var(--border-default)', marginBottom: '28px' }} />
-
-          {/* Image hero — shown for image-format documents uploaded with a blob URL */}
-          {doc.imageUrl && (
-            <div style={{ textAlign: 'center', margin: '0 0 28px 0' }}>
-              {heroImageFailed ? (
-                <div
-                  style={{
-                    padding: '40px 20px',
-                    color: 'var(--text-muted)',
-                    fontSize: '13px',
-                    textAlign: 'center',
-                  }}
-                >
-                  ⚠️ Image could not be loaded.
+              {/* Source-file preview — admins/users can click to open the original
+              file in a new browser tab. Hidden when no source was captured. */}
+              {doc.sourceFile && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      color: 'var(--text-secondary)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      marginBottom: '8px',
+                    }}
+                  >
+                    Original file
+                  </div>
+                  <FilePreviewCard
+                    name={doc.sourceFile.name}
+                    size={doc.sourceFile.size}
+                    type={doc.sourceFile.type}
+                    src={doc.sourceFile.dataUrl}
+                  />
                 </div>
-              ) : (
-                <img
-                  src={doc.imageUrl}
-                  alt={doc.title}
-                  style={{
-                    maxWidth: '100%',
-                    maxHeight: '560px',
-                    objectFit: 'contain',
-                    borderRadius: '10px',
-                    border: '1px solid var(--border-default)',
-                    boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-                  }}
-                  onError={() => setHeroImageFailed(true)}
-                />
               )}
-            </div>
+              <div
+                style={{ borderBottom: '2px solid var(--border-default)', marginBottom: '28px' }}
+              />
+
+              {/* Image hero — shown for image-format documents uploaded with a blob URL */}
+              {doc.imageUrl && (
+                <div style={{ textAlign: 'center', margin: '0 0 28px 0' }}>
+                  {heroImageFailed ? (
+                    <div
+                      style={{
+                        padding: '40px 20px',
+                        color: 'var(--text-muted)',
+                        fontSize: '13px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      ⚠️ Image could not be loaded.
+                    </div>
+                  ) : (
+                    <img
+                      src={doc.imageUrl}
+                      alt={doc.title}
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '560px',
+                        objectFit: 'contain',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border-default)',
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+                      }}
+                      onError={() => setHeroImageFailed(true)}
+                    />
+                  )}
+                </div>
+              )}
+
+              <MarkdownView content={doc.content} skipH1 />
+
+              {/* Prev/Next navigation */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginTop: '48px',
+                  paddingTop: '20px',
+                  borderTop: '2px solid var(--border-default)',
+                  gap: '12px',
+                }}
+              >
+                {prevDoc ? (
+                  <button
+                    onClick={() => onSelect(prevDoc)}
+                    style={{
+                      flex: 1,
+                      padding: '14px 16px',
+                      background: 'var(--bg-page)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      fontFamily: "'Inter', sans-serif",
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        color: 'var(--text-muted)',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      ← PREVIOUS
+                    </div>
+                    <div
+                      style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}
+                    >
+                      {prevDoc.icon} {prevDoc.title}
+                    </div>
+                  </button>
+                ) : (
+                  <div style={{ flex: 1 }} />
+                )}
+                {nextDoc ? (
+                  <button
+                    onClick={() => onSelect(nextDoc)}
+                    style={{
+                      flex: 1,
+                      padding: '14px 16px',
+                      background: 'var(--bg-page)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      fontFamily: "'Inter', sans-serif",
+                      textAlign: 'right',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        color: 'var(--text-muted)',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      NEXT →
+                    </div>
+                    <div
+                      style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}
+                    >
+                      {nextDoc.icon} {nextDoc.title}
+                    </div>
+                  </button>
+                ) : (
+                  <div style={{ flex: 1 }} />
+                )}
+              </div>
+            </>
           )}
-
-          <MarkdownView content={doc.content} skipH1 />
-
-          {/* Prev/Next navigation */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              marginTop: '48px',
-              paddingTop: '20px',
-              borderTop: '2px solid var(--border-default)',
-              gap: '12px',
-            }}
-          >
-            {prevDoc ? (
-              <button
-                onClick={() => onSelect(prevDoc)}
-                style={{
-                  flex: 1,
-                  padding: '14px 16px',
-                  background: 'var(--bg-page)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                  fontFamily: "'Inter', sans-serif",
-                  textAlign: 'left',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    color: 'var(--text-muted)',
-                    marginBottom: '4px',
-                  }}
-                >
-                  ← PREVIOUS
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {prevDoc.icon} {prevDoc.title}
-                </div>
-              </button>
-            ) : (
-              <div style={{ flex: 1 }} />
-            )}
-            {nextDoc ? (
-              <button
-                onClick={() => onSelect(nextDoc)}
-                style={{
-                  flex: 1,
-                  padding: '14px 16px',
-                  background: 'var(--bg-page)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                  fontFamily: "'Inter', sans-serif",
-                  textAlign: 'right',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    color: 'var(--text-muted)',
-                    marginBottom: '4px',
-                  }}
-                >
-                  NEXT →
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {nextDoc.icon} {nextDoc.title}
-                </div>
-              </button>
-            ) : (
-              <div style={{ flex: 1 }} />
-            )}
-          </div>
         </div>
       </div>
     </div>
@@ -1111,7 +1481,7 @@ function ArchivedDocsList({ onRestore }) {
               }}
               style={{
                 padding: '8px 14px',
-                background: '#DCFCE7',
+                background: 'rgba(22, 163, 74, 0.18)',
                 color: '#15803D',
                 border: '1px solid #86EFAC',
                 borderRadius: '7px',
@@ -1328,6 +1698,7 @@ export default function DocImportExportPage({
   const [activeTab, setActiveTab] = useState('library');
   const [catTab, setCatTab] = useState('All');
   const [fullPageDoc, setFullPageDoc] = useState(null);
+  const [fullPageEdit, setFullPageEdit] = useState(false);
   const [sidebarDoc, setSidebarDoc] = useState(null);
   const [showUploader, setShowUploader] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
@@ -1363,7 +1734,6 @@ export default function DocImportExportPage({
   const [showBulkExportPicker, setShowBulkExportPicker] = useState(false);
   const [bulkCat, setBulkCat] = useState('');
   const [bulkVis, setBulkVis] = useState('');
-  const [editingDoc, setEditingDoc] = useState(null);
   const [flagDoc, setFlagDoc] = useState(null);
 
   // ── Toast system ─────────────────────────────────────────────────────────────
@@ -1408,8 +1778,9 @@ export default function DocImportExportPage({
     }
   });
 
-  const openFullPage = doc => {
+  const openFullPage = (doc, { edit = false } = {}) => {
     setFullPageDoc(doc);
+    setFullPageEdit(edit);
     const next = [doc.id, ...recentIds.filter(id => id !== doc.id)].slice(0, 5);
     setRecentIds(next);
     localStorage.setItem('pomelo_recent_docs', JSON.stringify(next));
@@ -1558,8 +1929,18 @@ export default function DocImportExportPage({
       <DocFullPage
         doc={fullPageDoc}
         allDocs={manager.docs}
-        onClose={() => setFullPageDoc(null)}
+        onClose={() => {
+          setFullPageDoc(null);
+          setFullPageEdit(false);
+        }}
         onSelect={openFullPage}
+        canEdit={role === 'superadmin'}
+        startInEdit={fullPageEdit}
+        onSaved={updates => {
+          onDocEdit?.(fullPageDoc);
+          setFullPageDoc(prev => ({ ...prev, ...updates }));
+          manager.loadDocs();
+        }}
       />
     );
   }
@@ -1711,7 +2092,7 @@ export default function DocImportExportPage({
                       padding: '8px 14px',
                       background: selectionMode ? 'var(--bg-hover)' : 'transparent',
                       color: selectionMode ? '#DC2626' : 'var(--text-secondary)',
-                      border: `1.5px solid ${selectionMode ? '#FCA5A5' : 'var(--border-default)'}`,
+                      border: `1.5px solid ${selectionMode ? 'rgba(220, 38, 38, 0.4)' : 'var(--border-default)'}`,
                       borderRadius: '8px',
                       fontFamily: "'Inter', sans-serif",
                       fontWeight: 700,
@@ -1846,7 +2227,8 @@ export default function DocImportExportPage({
                                 padding: '9px 10px',
                                 borderRadius: '8px',
                                 border: `1.5px solid ${exportAllFormat === fmt.id ? 'var(--text-primary)' : 'transparent'}`,
-                                background: exportAllFormat === fmt.id ? '#F0F4FF' : 'transparent',
+                                background:
+                                  exportAllFormat === fmt.id ? 'var(--accent-soft)' : 'transparent',
                                 cursor: 'pointer',
                                 textAlign: 'left',
                                 marginBottom: '2px',
@@ -2097,7 +2479,7 @@ export default function DocImportExportPage({
                         padding: '7px 14px',
                         borderRadius: '100px',
                         border: `1.5px solid ${isActive ? 'var(--accent-primary)' : 'var(--border-default)'}`,
-                        background: isActive ? 'var(--accent-primary)' : '#fff',
+                        background: isActive ? 'var(--accent-primary)' : 'var(--bg-surface)',
                         color: isActive ? '#fff' : 'var(--text-secondary)',
                         fontFamily: "'Inter', sans-serif",
                         fontWeight: 700,
@@ -2250,7 +2632,7 @@ export default function DocImportExportPage({
                       disabled={bulkWorking}
                       style={{
                         padding: '7px 14px',
-                        background: '#FEF2F2',
+                        background: 'rgba(220, 38, 38, 0.10)',
                         color: '#DC2626',
                         border: '1px solid #FCA5A5',
                         borderRadius: '7px',
@@ -2272,7 +2654,7 @@ export default function DocImportExportPage({
                       disabled={bulkWorking}
                       style={{
                         padding: '7px 14px',
-                        background: '#F0F4FF',
+                        background: 'var(--accent-soft)',
                         color: 'var(--text-primary)',
                         border: '1px solid #BFDBFE',
                         borderRadius: '7px',
@@ -2327,7 +2709,8 @@ export default function DocImportExportPage({
                                   padding: '8px 10px',
                                   borderRadius: '7px',
                                   border: `1.5px solid ${bulkExportFmt === fmt.id ? 'var(--text-primary)' : 'transparent'}`,
-                                  background: bulkExportFmt === fmt.id ? '#F0F4FF' : 'transparent',
+                                  background:
+                                    bulkExportFmt === fmt.id ? 'var(--accent-soft)' : 'transparent',
                                   cursor: 'pointer',
                                   textAlign: 'left',
                                   fontSize: '12px',
@@ -2427,7 +2810,7 @@ export default function DocImportExportPage({
                     disabled={bulkWorking}
                     style={{
                       padding: '7px 14px',
-                      background: '#FFFBEB',
+                      background: 'rgba(245, 158, 11, 0.10)',
                       color: '#D97706',
                       border: '1px solid #FDE68A',
                       borderRadius: '7px',
@@ -2468,7 +2851,7 @@ export default function DocImportExportPage({
                 <div
                   style={{
                     padding: '10px 14px',
-                    background: '#F0F4FF',
+                    background: 'var(--accent-soft)',
                     border: '1px solid #BFDBFE',
                     borderRadius: '8px',
                     marginBottom: '16px',
@@ -2565,7 +2948,7 @@ export default function DocImportExportPage({
                 <div
                   style={{
                     padding: '14px 18px',
-                    background: '#FEF2F2',
+                    background: 'rgba(220, 38, 38, 0.10)',
                     border: '1px solid #FCA5A5',
                     borderRadius: '8px',
                     color: '#DC2626',
@@ -2597,7 +2980,7 @@ export default function DocImportExportPage({
                       onToggleBookmark={manager.toggleBookmark}
                       onOpen={setSidebarDoc}
                       onFullPage={openFullPage}
-                      onEdit={setEditingDoc}
+                      onEdit={d => openFullPage(d, { edit: true })}
                       selectionMode={selectionMode}
                       isSelected={selectedIds.includes(doc.id)}
                       onToggleSelect={manager.toggleSelected}
@@ -2805,7 +3188,7 @@ export default function DocImportExportPage({
                             fontWeight: 700,
                             padding: '3px 8px',
                             borderRadius: '4px',
-                            background: '#EFF6FF',
+                            background: 'rgba(59, 130, 246, 0.12)',
                             color: '#2563EB',
                             border: '1px solid #BFDBFE',
                           }}
@@ -2899,7 +3282,7 @@ export default function DocImportExportPage({
             <DocAdminPanel
               docs={manager.docs}
               onRefresh={manager.loadDocs}
-              onEdit={setEditingDoc}
+              onEdit={d => openFullPage(d, { edit: true })}
             />
           )}
 
@@ -2924,19 +3307,6 @@ export default function DocImportExportPage({
               setShowUploader(false);
               manager.loadDocs();
             }}
-          />
-        )}
-
-        {/* Edit modal */}
-        {editingDoc && (
-          <DocEditModal
-            doc={editingDoc}
-            onSave={() => {
-              onDocEdit?.(editingDoc);
-              manager.loadDocs();
-              setEditingDoc(null);
-            }}
-            onClose={() => setEditingDoc(null)}
           />
         )}
 
@@ -3021,8 +3391,12 @@ export default function DocImportExportPage({
               maxWidth: '380px',
               boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
               background:
-                t.type === 'success' ? '#F0FDF4' : t.type === 'error' ? '#FEF2F2' : '#EFF6FF',
-              border: `1px solid ${t.type === 'success' ? '#BBF7D0' : t.type === 'error' ? '#FCA5A5' : '#BFDBFE'}`,
+                t.type === 'success'
+                  ? 'rgba(22, 163, 74, 0.12)'
+                  : t.type === 'error'
+                    ? 'rgba(220, 38, 38, 0.10)'
+                    : 'rgba(59, 130, 246, 0.12)',
+              border: `1px solid ${t.type === 'success' ? 'rgba(22, 163, 74, 0.4)' : t.type === 'error' ? 'rgba(220, 38, 38, 0.4)' : 'rgba(59, 130, 246, 0.4)'}`,
               fontFamily: "'Inter', sans-serif",
               animation: 'slideUp 0.2s ease',
             }}

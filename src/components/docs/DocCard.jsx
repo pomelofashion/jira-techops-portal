@@ -67,7 +67,7 @@ export default function DocCard({
         {text.slice(0, idx)}
         <mark
           style={{
-            background: '#FEF08A',
+            background: 'rgba(250, 204, 21, 0.35)',
             color: 'var(--text-primary)',
             borderRadius: '2px',
             padding: '0 1px',
@@ -85,7 +85,7 @@ export default function DocCard({
       role="article"
       aria-label={doc.title}
       style={{
-        background: isSelected ? '#F0F7FF' : '#fff',
+        background: isSelected ? 'var(--accent-soft)' : 'var(--bg-surface)',
         border: isSelected
           ? '1.5px solid var(--text-primary)'
           : `1px solid ${hovering && !selectionMode ? 'var(--accent-primary)' : 'var(--border-default)'}`,
@@ -119,7 +119,7 @@ export default function DocCard({
             height: '20px',
             borderRadius: '5px',
             border: `2px solid ${isSelected ? 'var(--text-primary)' : 'var(--text-muted)'}`,
-            background: isSelected ? 'var(--text-primary)' : '#fff',
+            background: isSelected ? 'var(--text-primary)' : 'var(--bg-surface)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -196,7 +196,7 @@ export default function DocCard({
                   fontWeight: 700,
                   padding: '2px 7px',
                   borderRadius: '4px',
-                  background: '#FEF9C3',
+                  background: 'rgba(250, 204, 21, 0.18)',
                   color: '#854D0E',
                   border: '1px solid #FDE047',
                 }}
@@ -310,7 +310,7 @@ export default function DocCard({
               fontSize: '10px',
               fontWeight: 700,
               color: 'var(--text-primary)',
-              background: '#EFF6FF',
+              background: 'rgba(59, 130, 246, 0.12)',
               border: '1px solid #BFDBFE',
               borderRadius: '4px',
               padding: '2px 6px',
@@ -344,7 +344,10 @@ export default function DocCard({
               fontWeight: 700,
               padding: '2px 6px',
               borderRadius: '100px',
-              background: doc.visibility === 'IT Team Only' ? '#FEF2F2' : '#F0FDF4',
+              background:
+                doc.visibility === 'IT Team Only'
+                  ? 'rgba(220, 38, 38, 0.10)'
+                  : 'rgba(22, 163, 74, 0.10)',
               color: doc.visibility === 'IT Team Only' ? '#DC2626' : '#16A34A',
               border: `1px solid ${doc.visibility === 'IT Team Only' ? '#FCA5A5' : '#BBF7D0'}`,
             }}
@@ -431,7 +434,7 @@ export default function DocCard({
                 aria-label={doc.featured ? 'Unpin doc from Home' : 'Pin doc to Home'}
                 style={{
                   padding: '6px 10px',
-                  background: doc.featured ? '#FEF3C7' : 'var(--bg-page)',
+                  background: doc.featured ? 'rgba(245, 158, 11, 0.18)' : 'var(--bg-page)',
                   border: `1px solid ${doc.featured ? '#FDE68A' : 'var(--border-default)'}`,
                   borderRadius: '6px',
                   cursor: 'pointer',
@@ -452,7 +455,7 @@ export default function DocCard({
                 aria-label={doc.review ? 'Mark review complete' : 'Flag doc for review'}
                 style={{
                   padding: '6px 10px',
-                  background: doc.review ? '#FEE2E2' : 'var(--bg-page)',
+                  background: doc.review ? 'rgba(220, 38, 38, 0.18)' : 'var(--bg-page)',
                   border: `1px solid ${doc.review ? '#FCA5A5' : 'var(--border-default)'}`,
                   borderRadius: '6px',
                   cursor: 'pointer',
@@ -497,7 +500,7 @@ export default function DocCard({
               aria-label="Restore document"
               style={{
                 padding: '6px 10px',
-                background: '#DCFCE7',
+                background: 'rgba(22, 163, 74, 0.18)',
                 border: '1px solid #86EFAC',
                 borderRadius: '6px',
                 cursor: 'pointer',
@@ -519,7 +522,7 @@ export default function DocCard({
           style={{
             marginTop: '8px',
             padding: '6px 10px',
-            background: '#FEF2F2',
+            background: 'rgba(220, 38, 38, 0.10)',
             border: '1px solid #FCA5A5',
             borderRadius: '6px',
             fontSize: '11px',
@@ -538,7 +541,7 @@ export default function DocCard({
             top: '8px',
             right: '8px',
             padding: '3px 8px',
-            background: '#FEF3C7',
+            background: 'rgba(245, 158, 11, 0.18)',
             color: '#92400E',
             borderRadius: '100px',
             fontSize: '10px',

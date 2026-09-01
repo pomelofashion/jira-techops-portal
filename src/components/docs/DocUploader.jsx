@@ -23,10 +23,10 @@ const FILE_TYPE_ICONS = [
 
 const STATUS_CONFIG = {
   queued: { label: 'Queued', color: 'var(--text-secondary)', bg: 'var(--bg-hover)' },
-  uploading: { label: 'Uploading', color: '#2563EB', bg: '#EFF6FF' },
-  complete: { label: 'Complete', color: '#16A34A', bg: '#F0FDF4' },
-  error: { label: 'Error', color: '#DC2626', bg: '#FEF2F2' },
-  skipped: { label: 'Skipped', color: '#D97706', bg: '#FFFBEB' },
+  uploading: { label: 'Uploading', color: '#2563EB', bg: 'rgba(59, 130, 246, 0.12)' },
+  complete: { label: 'Complete', color: '#16A34A', bg: 'rgba(22, 163, 74, 0.10)' },
+  error: { label: 'Error', color: '#DC2626', bg: 'rgba(220, 38, 38, 0.10)' },
+  skipped: { label: 'Skipped', color: '#D97706', bg: 'rgba(245, 158, 11, 0.10)' },
 };
 
 const fmtSize = bytes => {
@@ -428,7 +428,7 @@ export default function DocUploader({
                     onClick={removeErrored}
                     style={{
                       padding: '6px 12px',
-                      background: '#FEF2F2',
+                      background: 'rgba(220, 38, 38, 0.10)',
                       color: '#DC2626',
                       border: '1px solid #FCA5A5',
                       borderRadius: '7px',
@@ -506,7 +506,8 @@ export default function DocUploader({
                       style={{
                         borderBottom:
                           idx < queue.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                        background: item.status === 'error' ? '#FEF9F9' : '#fff',
+                        background:
+                          item.status === 'error' ? 'rgba(220, 38, 38, 0.10)' : 'var(--bg-surface)',
                       }}
                     >
                       {/* File name */}
@@ -588,7 +589,7 @@ export default function DocUploader({
                                 fontWeight: 700,
                                 padding: '2px 5px',
                                 borderRadius: '4px',
-                                background: '#ECFDF5',
+                                background: 'rgba(16, 185, 129, 0.10)',
                                 color: '#059669',
                                 border: '1px solid #A7F3D0',
                                 whiteSpace: 'nowrap',
@@ -681,7 +682,7 @@ export default function DocUploader({
                               aria-label="Retry failed upload"
                               style={{
                                 padding: '3px 8px',
-                                background: '#EFF6FF',
+                                background: 'rgba(59, 130, 246, 0.12)',
                                 border: '1px solid #BFDBFE',
                                 borderRadius: '4px',
                                 cursor: 'pointer',
@@ -700,7 +701,7 @@ export default function DocUploader({
                             aria-label={`Remove ${item.title || item.file?.name} from queue`}
                             style={{
                               padding: '4px 8px',
-                              background: '#FEF2F2',
+                              background: 'rgba(220, 38, 38, 0.10)',
                               border: '1px solid #FCA5A5',
                               borderRadius: '5px',
                               cursor: 'pointer',
@@ -761,7 +762,8 @@ export default function DocUploader({
               style={{
                 padding: '14px 16px',
                 borderRadius: '10px',
-                background: uploadSummary.failed > 0 ? '#FFFBEB' : '#F0FDF4',
+                background:
+                  uploadSummary.failed > 0 ? 'rgba(245, 158, 11, 0.10)' : 'rgba(22, 163, 74, 0.10)',
                 border: `1px solid ${uploadSummary.failed > 0 ? '#FDE68A' : '#BBF7D0'}`,
                 marginBottom: '14px',
                 fontSize: '13px',

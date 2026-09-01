@@ -371,7 +371,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
             alignItems: 'center',
             gap: '10px',
             padding: '10px 14px',
-            background: '#FEF2F2',
+            background: 'rgba(220, 38, 38, 0.10)',
             border: '1px solid #FCA5A5',
             borderRadius: '8px',
             marginBottom: '12px',
@@ -404,7 +404,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
             gap: '8px',
             alignItems: 'center',
             padding: '10px 14px',
-            background: '#EFF6FF',
+            background: 'rgba(59, 130, 246, 0.12)',
             border: '1px solid #BFDBFE',
             borderRadius: '8px',
             marginBottom: '12px',
@@ -538,10 +538,10 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
                   key={doc.id}
                   style={{
                     background: selected.includes(doc.id)
-                      ? '#F0F7FF'
+                      ? 'var(--accent-soft)'
                       : isArchived
-                        ? '#FAFAFA'
-                        : '#fff',
+                        ? 'var(--bg-hover)'
+                        : 'var(--bg-surface)',
                     opacity: isArchived ? 0.7 : 1,
                   }}
                 >
@@ -616,7 +616,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
                         fontWeight: 700,
                         padding: '2px 8px',
                         borderRadius: '100px',
-                        background: isArchived ? 'var(--bg-hover)' : '#F0FDF4',
+                        background: isArchived ? 'var(--bg-hover)' : 'rgba(22, 163, 74, 0.10)',
                         color: isArchived ? 'var(--text-secondary)' : '#16A34A',
                       }}
                     >
@@ -631,7 +631,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
                         aria-label={`Edit ${doc.title}`}
                         style={{
                           padding: '4px 8px',
-                          background: '#F0F4FF',
+                          background: 'var(--accent-soft)',
                           border: '1px solid #BFDBFE',
                           borderRadius: '5px',
                           cursor: 'pointer',
@@ -679,7 +679,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
                           aria-label={`Restore ${doc.title}`}
                           style={{
                             padding: '4px 8px',
-                            background: '#F0FDF4',
+                            background: 'rgba(22, 163, 74, 0.10)',
                             border: '1px solid #BBF7D0',
                             borderRadius: '5px',
                             cursor: 'pointer',
@@ -697,7 +697,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
                           aria-label={`Archive ${doc.title}`}
                           style={{
                             padding: '4px 8px',
-                            background: '#FEF2F2',
+                            background: 'rgba(220, 38, 38, 0.10)',
                             border: '1px solid #FCA5A5',
                             borderRadius: '5px',
                             cursor: 'pointer',

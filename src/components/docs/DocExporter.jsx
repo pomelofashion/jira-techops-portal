@@ -46,7 +46,7 @@ const FORMATS = [
     icon: '📃',
     desc: 'Stripped plain text',
     ext: '.txt',
-    color: '#64748B',
+    color: 'var(--text-secondary)',
   },
   {
     id: 'CSV',
@@ -307,8 +307,8 @@ export default function DocExporter({ doc, onClose }) {
     <div
       ref={ref}
       style={{
-        background: '#fff',
-        border: '1px solid #E2E8F0',
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border-default)',
         borderRadius: '12px',
         boxShadow: '0 8px 32px rgba(0,0,0,0.14)',
         width: '280px',
@@ -316,7 +316,7 @@ export default function DocExporter({ doc, onClose }) {
         fontFamily: "'Lato', sans-serif",
       }}
     >
-      <div style={{ background: '#111111', padding: '14px 16px' }}>
+      <div style={{ background: 'var(--bg-branded)', padding: '14px 16px' }}>
         <div style={{ color: '#fff', fontWeight: 900, fontSize: '13px' }}>Export Document</div>
         <div
           style={{
@@ -354,10 +354,12 @@ export default function DocExporter({ doc, onClose }) {
           >
             <span style={{ fontSize: '18px', width: '24px', textAlign: 'center' }}>{fmt.icon}</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: '#111111' }}>{fmt.label}</div>
-              <div style={{ fontSize: '11px', color: '#94A3B8' }}>{fmt.desc}</div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                {fmt.label}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{fmt.desc}</div>
             </div>
-            <div style={{ fontSize: '10px', color: '#94A3B8', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
               {estSize(doc, fmt.id)}
             </div>
           </button>
@@ -388,12 +390,12 @@ export default function DocExporter({ doc, onClose }) {
           style={{
             padding: '10px 14px',
             background: 'transparent',
-            border: '1.5px solid #E2E8F0',
+            border: '1.5px solid var(--border-default)',
             borderRadius: '8px',
             fontFamily: "'Lato', sans-serif",
             fontSize: '13px',
             cursor: 'pointer',
-            color: '#64748B',
+            color: 'var(--text-secondary)',
           }}
         >
           ✕

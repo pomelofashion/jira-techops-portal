@@ -45,12 +45,12 @@ export const extractHeadings = content => {
 };
 
 const CALLOUTS = {
-  info: { icon: 'ℹ️', bg: '#EFF6FF', border: '#3B82F6' },
+  info: { icon: 'ℹ️', bg: 'rgba(59, 130, 246, 0.12)', border: '#3B82F6' },
   note: { icon: '📝', bg: 'var(--bg-hover)', border: 'var(--border-strong)' },
-  tip: { icon: '💡', bg: '#F0FDF4', border: '#16A34A' },
-  success: { icon: '✅', bg: '#F0FDF4', border: '#16A34A' },
-  warning: { icon: '⚠️', bg: '#FFFBEB', border: '#F59E0B' },
-  error: { icon: '❌', bg: '#FEF2F2', border: '#DC2626' },
+  tip: { icon: '💡', bg: 'rgba(22, 163, 74, 0.12)', border: '#16A34A' },
+  success: { icon: '✅', bg: 'rgba(22, 163, 74, 0.12)', border: '#16A34A' },
+  warning: { icon: '⚠️', bg: 'rgba(245, 158, 11, 0.12)', border: '#F59E0B' },
+  error: { icon: '❌', bg: 'rgba(220, 38, 38, 0.10)', border: '#DC2626' },
 };
 
 // ─── Inline formatting ────────────────────────────────────────────────────────
