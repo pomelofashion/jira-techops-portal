@@ -350,18 +350,13 @@ for (const theme of ['light', 'dark']) {
       await audit(page, 'Audit log', theme, 'admin-audit');
     });
 
-    test(`feedback inbox (${theme})`, async ({ page }) => {
+    test(`suggestions board (${theme})`, async ({ page }) => {
       test.setTimeout(45_000);
       await freshLogin(page, ADMIN);
       await setTheme(page, theme);
-      await page.click('button[aria-label="Admin tools"]').catch(() => {});
-      await page.waitForTimeout(200);
-      await page
-        .locator('[role="menuitem"]:has-text("Feedback")')
-        .click()
-        .catch(() => {});
-      await page.waitForTimeout(500);
-      await audit(page, 'Feedback inbox', theme, 'admin-feedback');
+      await page.goto(BASE + '/#suggestions');
+      await page.waitForTimeout(600);
+      await audit(page, 'Suggestions board', theme, 'suggestions');
     });
 
     test(`ticket with internal notes (${theme})`, async ({ page }) => {

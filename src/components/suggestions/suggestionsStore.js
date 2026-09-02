@@ -1,10 +1,44 @@
 // src/components/suggestions/suggestionsStore.js
-// localStorage-backed store for the Suggestions board (Reddit-style feedback).
-// Matches the app's current mock/localStorage pattern (pomelo:v1: prefix) so it
-// works today; this is the same data shape a future /api/suggestions + S3 layer
-// will persist once the backend migration lands.
+// Store for the Suggestions board (Reddit-style feedback) — also fed by the
+// floating feedback bubble. In backend mode (API_ENABLED) it keeps a
+// module-level in-memory array that hydrates from /api/suggestions and syncs
+// every mutation to the server in the background, so mutators stay
+// synchronous for optimistic UI. Mock mode keeps the original
+// localStorage-per-browser behavior with demo seeds.
+
+import { API_ENABLED } from '../../api/client.js';
+import {
+  listSuggestions,
+  createSuggestionApi,
+  voteSuggestionApi,
+  setSuggestionStatusApi,
+  deleteSuggestionApi,
+  addSuggestionCommentApi,
+  deleteSuggestionCommentApi,
+} from '../../api/suggestionsApi.js';
 
 const KEY = 'pomelo:v1:suggestions';
+
+// Backend-mode cache — hydrated from the server on page mount.
+let MEMORY = [];
+
+// Fire-and-forget server sync — optimistic UI keeps the local copy; a failed
+// sync surfaces on the next hydration rather than blocking the interaction.
+const sync = promise => {
+  promise.then(({ error }) => {
+    if (error) console.error('[suggestions] sync failed:', error);
+  });
+};
+
+// Fetch the board from the server, replacing the in-memory copy.
+export async function hydrateSuggestions() {
+  if (!API_ENABLED) return loadSuggestions();
+  const { data, error } = await listSuggestions();
+  if (!error && data?.suggestions) {
+    MEMORY = data.suggestions;
+  }
+  return MEMORY.slice();
+}
 const safeLocal = typeof window !== 'undefined' && window.localStorage;
 
 export const STATUSES = ['Open', 'Under review', 'Planned', 'In progress', 'Done', 'Declined'];
@@ -78,6 +112,7 @@ const seed = () => {
 };
 
 export function loadSuggestions() {
+  if (API_ENABLED) return MEMORY.slice();
   if (!safeLocal) return seed();
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -94,6 +129,10 @@ export function loadSuggestions() {
 }
 
 function save(list) {
+  if (API_ENABLED) {
+    MEMORY = list;
+    return list;
+  }
   if (!safeLocal) return list;
   try {
     window.localStorage.setItem(KEY, JSON.stringify(list));
@@ -123,8 +162,46 @@ export function createSuggestion(fields) {
     updatedAt: now,
     votes: { [fields.authorEmail]: 1 }, // author auto-upvotes their own post
     comments: [],
+    page: fields.page || '',
+    pageLabel: fields.pageLabel || '',
   };
+  if (API_ENABLED) {
+    sync(
+      createSuggestionApi({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        category: item.category,
+        page: item.page,
+        pageLabel: item.pageLabel,
+        authorRoleLabel: item.authorRoleLabel,
+        authorRoleColor: item.authorRoleColor,
+      })
+    );
+  }
   return save([item, ...list]);
+}
+
+// Awaitable variant for surfaces that need real success/error feedback (the
+// feedback bubble). Inserts the server-confirmed row into the local cache.
+export async function submitSuggestion(fields) {
+  if (!API_ENABLED) {
+    createSuggestion(fields);
+    return { error: null };
+  }
+  const { data, error } = await createSuggestionApi({
+    id: uid('sg'),
+    title: fields.title,
+    body: fields.body || '',
+    category: fields.category || 'Other',
+    page: fields.page || '',
+    pageLabel: fields.pageLabel || '',
+    authorRoleLabel: fields.authorRoleLabel || 'User',
+    authorRoleColor: fields.authorRoleColor || '#52525B',
+  });
+  if (error) return { error };
+  MEMORY = [data, ...MEMORY.filter(s => s.id !== data.id)];
+  return { error: null, data };
 }
 
 export function voteSuggestion(id, email, dir) {
@@ -136,6 +213,7 @@ export function voteSuggestion(id, email, dir) {
     else votes[email] = dir;
     return { ...s, votes };
   });
+  if (API_ENABLED) sync(voteSuggestionApi(id, dir));
   return save(list);
 }
 
@@ -143,10 +221,12 @@ export function setStatus(id, status) {
   const list = loadSuggestions().map(s =>
     s.id === id ? { ...s, status, updatedAt: new Date().toISOString() } : s
   );
+  if (API_ENABLED) sync(setSuggestionStatusApi(id, status));
   return save(list);
 }
 
 export function deleteSuggestion(id) {
+  if (API_ENABLED) sync(deleteSuggestionApi(id));
   return save(loadSuggestions().filter(s => s.id !== id));
 }
 
@@ -165,6 +245,18 @@ export function addComment(id, comment) {
       attachments: comment.attachments || [],
       createdAt: new Date().toISOString(),
     };
+    if (API_ENABLED) {
+      sync(
+        addSuggestionCommentApi(id, {
+          id: c.id,
+          parentId: c.parentId,
+          body: c.body,
+          attachments: c.attachments,
+          authorRoleLabel: c.authorRoleLabel,
+          authorRoleColor: c.authorRoleColor,
+        })
+      );
+    }
     return { ...s, comments: [...(s.comments || []), c], updatedAt: new Date().toISOString() };
   });
   return save(list);
@@ -177,6 +269,7 @@ export function deleteComment(id, commentId) {
     const comments = (s.comments || []).filter(c => c.id !== commentId && c.parentId !== commentId);
     return { ...s, comments };
   });
+  if (API_ENABLED) sync(deleteSuggestionCommentApi(id, commentId));
   return save(list);
 }
 

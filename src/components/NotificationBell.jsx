@@ -48,7 +48,7 @@ export default function NotificationBell({ onNavigate }) {
     setOpen(false);
     if (n.ticketId && onNavigate) onNavigate('mytickets', n.ticketId);
     else if (n.docId && onNavigate) onNavigate('docs', n.docId);
-    else if (n.type === 'feedback' && onNavigate) onNavigate('feedback');
+    else if (n.type === 'suggestion' && onNavigate) onNavigate('suggestions');
   };
 
   return (

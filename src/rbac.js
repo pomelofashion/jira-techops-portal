@@ -150,12 +150,6 @@ export const CAPABILITIES = Object.freeze([
     description: 'Read the immutable action history.',
   },
   {
-    id: 'feedback.view',
-    group: 'Admin',
-    label: 'View platform feedback',
-    description: 'Read past AI assistant conversations.',
-  },
-  {
     id: 'docs.manage',
     group: 'Admin',
     label: 'Manage documentation',
@@ -311,7 +305,6 @@ export const SEED_ROLES = Object.freeze([
       'changes.manage',
       'changes.approve',
       'audit.view',
-      'feedback.view',
       'docs.manage',
       'admin.kanban_view',
       'catalog.manage',
@@ -404,4 +397,4 @@ export const DEFAULT_ROLE_ID = 'role_user';
 export const SEED_EMAIL_REWRITE = Object.freeze({});
 
 // Bump this when the migration changes shape so future boots re-run it.
-export const RBAC_SCHEMA_VERSION = 5;
+export const RBAC_SCHEMA_VERSION = 6;

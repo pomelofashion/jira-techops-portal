@@ -8,7 +8,7 @@
 // can() from the host so it needs no app context. Persists via suggestionsStore
 // (localStorage today; same shape for the future /api/suggestions + S3 layer).
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import {
   ChevronUp,
   ChevronDown,
@@ -27,6 +27,7 @@ import { MarkdownView } from '../docs/MarkdownView.jsx';
 import { SEED_ROLES } from '../../rbac.js';
 import {
   loadSuggestions,
+  hydrateSuggestions,
   createSuggestion,
   voteSuggestion,
   setStatus,
@@ -591,6 +592,20 @@ function Detail({
             >
               {item.category}
             </span>
+            {item.pageLabel && (
+              <span
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '100px',
+                  background: 'var(--accent-soft)',
+                  color: 'var(--accent-primary)',
+                }}
+              >
+                📍 {item.pageLabel}
+              </span>
+            )}
           </div>
           <h1
             style={{
@@ -755,6 +770,20 @@ function Row({ item, me, onOpen, onVote }) {
           >
             {item.category}
           </span>
+          {item.pageLabel && (
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '100px',
+                background: 'var(--accent-soft)',
+                color: 'var(--accent-primary)',
+              }}
+            >
+              📍 {item.pageLabel}
+            </span>
+          )}
         </div>
         <div
           style={{
@@ -902,6 +931,16 @@ function Composer({ onClose, onCreate }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function SuggestionsPage({ currentUser, can, onToast }) {
   const [items, setItems] = useState(loadSuggestions);
+  // Backend mode: pull the shared board from the server on mount.
+  useEffect(() => {
+    let cancelled = false;
+    hydrateSuggestions().then(list => {
+      if (!cancelled) setItems(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [sort, setSort] = useState('hot'); // hot | new | top
   const [statusFilter, setStatusFilter] = useState('All');
   const [search, setSearch] = useState('');

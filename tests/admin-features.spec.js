@@ -49,7 +49,6 @@ test.describe('Admin view-mode pill', () => {
     await expect(page.locator('[role="menuitem"]:has-text("Admin Console")')).toBeVisible();
     await expect(page.locator('[role="menuitem"]:has-text("Users")')).toBeVisible();
     await expect(page.locator('[role="menuitem"]:has-text("Audit log")')).toBeVisible();
-    await expect(page.locator('[role="menuitem"]:has-text("Feedback")')).toBeVisible();
   });
 
   test('regular user sees no view-mode pill and no admin tools', async ({ page }) => {

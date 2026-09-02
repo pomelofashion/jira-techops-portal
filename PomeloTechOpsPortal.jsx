@@ -29,7 +29,10 @@ import { compressImageToDataUrl } from './src/lib/imageUtil.js';
 import * as authApi from './src/api/authApi.js';
 import * as ticketsApi from './src/api/ticketsApi.js';
 import * as usersApi from './src/api/usersApi.js';
-import * as feedbackApi from './src/api/feedbackApi.js';
+import {
+  submitSuggestion,
+  CATEGORIES as SUGGESTION_CATEGORIES,
+} from './src/components/suggestions/suggestionsStore.js';
 import * as rolesApi from './src/api/rolesApi.js';
 import * as spacesApi from './src/api/spacesApi.js';
 import { loadStore, saveStore, clearStore } from './src/lib/store.js';
@@ -97,7 +100,6 @@ import {
   Wrench,
   Users as UsersIcon,
   ScrollText,
-  MessageCircle,
   BookOpen,
   Target,
   ClipboardList,
@@ -13036,13 +13038,16 @@ function ResultsGroup({ label, icon, items, onPick }) {
 }
 
 // ─── Feedback widget (all authenticated users) ────────────────────────────────
-// The floating bubble on every page. Opens a small form — header + comment —
-// with a read-only "Page" field captured from the section the user was on
-// when they opened it, so admins always get the context.
-function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey }) {
+// The floating bubble on every page. A quick composer for the Suggestions
+// board: title + category + details, plus a read-only "Page" field captured
+// from the section the user was on when they opened it. Submissions land on
+// the shared Suggestions board (and ring superadmins' bells).
+function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey, onOpenBoard }) {
+  const { currentRole } = useRbacCtx();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [category, setCategory] = useState('Feature');
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState('');
@@ -13063,23 +13068,27 @@ function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey
     if (!title.trim() || !body.trim() || busy) return;
     setBusy(true);
     setError('');
-    if (API_ENABLED) {
-      const { error: apiError } = await feedbackApi.submitFeedback({
-        title: title.trim(),
-        body: body.trim(),
-        page: capturedPage.page,
-        pageLabel: capturedPage.label.slice(0, 80),
-      });
-      if (apiError) {
-        setError(apiError);
-        setBusy(false);
-        return;
-      }
+    const { error: apiError } = await submitSuggestion({
+      title: title.trim(),
+      body: body.trim(),
+      category,
+      page: capturedPage.page,
+      pageLabel: capturedPage.label.slice(0, 80),
+      authorName: _effectiveUser?.name,
+      authorEmail: _effectiveUser?.email,
+      authorRoleLabel: currentRole?.label || 'User',
+      authorRoleColor: currentRole?.color || '#52525B',
+    });
+    if (apiError) {
+      setError(apiError);
+      setBusy(false);
+      return;
     }
     setBusy(false);
     setSent(true);
     setTitle('');
     setBody('');
+    setCategory('Feature');
   };
 
   const fieldLabel = {
@@ -13179,7 +13188,7 @@ function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey
             <div style={{ flex: 1 }}>
               <div style={{ color: '#fff', fontWeight: 800, fontSize: '14px' }}>Share feedback</div>
               <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '11px' }}>
-                Help us improve the portal
+                Posts to the Suggestions board
               </div>
             </div>
             <button
@@ -13210,10 +13219,10 @@ function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey
                   marginBottom: '4px',
                 }}
               >
-                Thanks — your feedback was sent
+                Thanks — your suggestion was posted
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-                The team reviews every submission.
+                It's live on the Suggestions board where the team and other users can weigh in.
               </div>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                 <button
@@ -13231,6 +13240,25 @@ function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey
                   }}
                 >
                   Send another
+                </button>
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenBoard?.();
+                  }}
+                  style={{
+                    padding: '8px 14px',
+                    background: 'var(--bg-elevated)',
+                    border: '1.5px solid var(--border-default)',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontFamily: "'Inter', sans-serif",
+                  }}
+                >
+                  View board
                 </button>
                 <button
                   onClick={() => setOpen(false)}
@@ -13262,6 +13290,21 @@ function FeedbackWidget({ effectiveUser: _effectiveUser, section, activeBoardKey
                   aria-label="Feedback header"
                   style={fieldInput}
                 />
+              </div>
+              <div>
+                <label style={fieldLabel}>Category</label>
+                <select
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  aria-label="Suggestion category"
+                  style={fieldInput}
+                >
+                  {SUGGESTION_CATEGORIES.map(c => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label style={fieldLabel}>Comment</label>
@@ -13349,218 +13392,6 @@ function MaintenanceBanner() {
         {m.enabledBy && (
           <span style={{ marginLeft: '8px', fontWeight: 400 }}>— posted by {m.enabledBy}</span>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Feedback inbox (admin only) ─────────────────────────────────────────────
-// Reviews platform feedback submitted through the floating bubble. Each entry
-// carries the page it was created from (read-only, captured client-side).
-function FeedbackAdminPage() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [confirmId, setConfirmId] = useState(null);
-
-  const load = async () => {
-    setLoading(true);
-    setLoadError('');
-    const { data, error } = await feedbackApi.listFeedback();
-    if (error) setLoadError(error);
-    else setItems(data.feedback || []);
-    setLoading(false);
-  };
-  useEffect(() => {
-    if (API_ENABLED) load();
-    else setLoading(false);
-  }, []);
-
-  const toggleStatus = async item => {
-    const next = item.status === 'New' ? 'Reviewed' : 'New';
-    const { error } = await feedbackApi.setFeedbackStatus(item.id, next);
-    if (!error) setItems(prev => prev.map(f => (f.id === item.id ? { ...f, status: next } : f)));
-  };
-
-  const remove = async id => {
-    const { error } = await feedbackApi.deleteFeedback(id);
-    if (!error) setItems(prev => prev.filter(f => f.id !== id));
-    setConfirmId(null);
-  };
-
-  const newCount = items.filter(f => f.status === 'New').length;
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 900, color: 'var(--text-primary)' }}>
-          💡 Feedback
-        </h1>
-        {newCount > 0 && (
-          <span
-            style={{
-              fontSize: '12px',
-              fontWeight: 800,
-              padding: '2px 10px',
-              borderRadius: '100px',
-              background: 'var(--accent-soft)',
-              color: 'var(--accent-primary)',
-            }}
-          >
-            {newCount} new
-          </span>
-        )}
-      </div>
-      <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px' }}>
-        Platform feedback submitted through the bubble — with the page it came from.
-      </p>
-
-      {loading && (
-        <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Loading feedback…</div>
-      )}
-      {loadError && (
-        <div role="alert" style={{ color: '#DC2626', fontSize: '13px', fontWeight: 600 }}>
-          {loadError}
-        </div>
-      )}
-      {!loading && !loadError && items.length === 0 && (
-        <div
-          style={{
-            padding: '48px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-            fontSize: '14px',
-            background: 'var(--bg-surface)',
-            border: '1px dashed var(--border-default)',
-            borderRadius: '12px',
-          }}
-        >
-          📭 No feedback yet — it will appear here as users submit it.
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {items.map(item => (
-          <div
-            key={item.id}
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-default)',
-              borderLeft:
-                item.status === 'New'
-                  ? '4px solid var(--accent-primary)'
-                  : '4px solid var(--border-default)',
-              borderRadius: '10px',
-              padding: '14px 16px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                {item.title}
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '100px',
-                  background: 'var(--accent-soft)',
-                  color: 'var(--accent-primary)',
-                }}
-              >
-                📍 {item.pageLabel || item.page}
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: '100px',
-                  background:
-                    item.status === 'New' ? 'rgba(245, 158, 11, 0.18)' : 'var(--bg-hover)',
-                  color: item.status === 'New' ? '#D97706' : 'var(--text-muted)',
-                }}
-              >
-                {item.status}
-              </span>
-            </div>
-            <div
-              style={{
-                fontSize: '13px',
-                color: 'var(--text-secondary)',
-                margin: '8px 0',
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {item.body}
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                fontSize: '11px',
-                color: 'var(--text-muted)',
-              }}
-            >
-              <span>
-                {item.authorName} · {new Date(item.createdAt).toLocaleString()}
-              </span>
-              <span style={{ flex: 1 }} />
-              <button
-                onClick={() => toggleStatus(item)}
-                style={{
-                  padding: '5px 10px',
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  fontFamily: "'Inter', sans-serif",
-                }}
-              >
-                {item.status === 'New' ? '✓ Mark reviewed' : '↩ Mark new'}
-              </button>
-              {confirmId === item.id ? (
-                <button
-                  onClick={() => remove(item.id)}
-                  style={{
-                    padding: '5px 10px',
-                    background: '#DC2626',
-                    border: 'none',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontFamily: "'Inter', sans-serif",
-                  }}
-                >
-                  Confirm delete
-                </button>
-              ) : (
-                <button
-                  onClick={() => setConfirmId(item.id)}
-                  style={{
-                    padding: '5px 10px',
-                    background: 'transparent',
-                    border: '1px solid rgba(220, 38, 38, 0.4)',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    color: '#DC2626',
-                    cursor: 'pointer',
-                    fontFamily: "'Inter', sans-serif",
-                  }}
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -13835,7 +13666,6 @@ const SECTION_LABELS = {
   roles: 'Roles & Access',
   users: 'Users',
   audit: 'Audit log',
-  feedback: 'Feedback',
 };
 
 const RESOURCE_ITEMS = [
@@ -14384,7 +14214,6 @@ const WIDE_SECTIONS = new Set([
   'admin',
   'users',
   'audit',
-  'feedback',
   'roles',
   'devportal',
   'board',
@@ -14417,7 +14246,6 @@ const VALID_SECTIONS = new Set([
   'roles',
   'users',
   'audit',
-  'feedback',
   'board',
   'catalog-admin',
   'spaces-admin',
@@ -14509,13 +14337,6 @@ const ADMIN_TOOLS = [
     label: 'Audit log',
     hint: 'Immutable action history',
     cap: 'audit.view',
-  },
-  {
-    id: 'feedback',
-    Icon: MessageCircle,
-    label: 'Feedback',
-    hint: 'User-submitted platform feedback',
-    cap: 'feedback.view',
   },
 ];
 // ─── Admin View Mode pill ─────────────────────────────────────────────────────
@@ -15089,7 +14910,6 @@ function AppContent() {
       users: 'users.edit',
       roles: 'roles.edit',
       audit: 'audit.view',
-      feedback: 'feedback.view',
       devportal: 'tickets.view_assigned',
       'catalog-admin': 'catalog.manage',
       'spaces-admin': 'spaces.manage',
@@ -15332,13 +15152,6 @@ function AppContent() {
       case 'audit':
         page = can('audit.view') ? (
           <AuditLogPage />
-        ) : (
-          <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
-        );
-        break;
-      case 'feedback':
-        page = can('feedback.view') ? (
-          <FeedbackAdminPage />
         ) : (
           <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
         );
@@ -15604,10 +15417,7 @@ function AppContent() {
               {(can('admin.kanban_view') ||
                 can('users.edit') ||
                 can('roles.edit') ||
-                can('audit.view') ||
-                can('feedback.view')) && (
-                <AdminToolsDropdown section={section} onPick={setSection} />
-              )}
+                can('audit.view')) && <AdminToolsDropdown section={section} onPick={setSection} />}
 
               {/* Notification bell */}
               <NotificationBell
@@ -15735,6 +15545,7 @@ function AppContent() {
           effectiveUser={effectiveUser}
           section={section}
           activeBoardKey={activeBoardKey}
+          onOpenBoard={() => setSection('suggestions')}
         />
         <GlobalSearchPalette
           open={searchOpen}
