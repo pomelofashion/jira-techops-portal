@@ -22,20 +22,39 @@ const KEY = 'pomelo:v1:suggestions';
 // Backend-mode cache — hydrated from the server on page mount.
 let MEMORY = [];
 
+// Change listeners — lets the board re-render when a different surface (the
+// feedback bubble, a background re-sync) writes to the store. Same pattern
+// as the tickets store's version pub/sub.
+const listeners = new Set();
+export const subscribeSuggestions = fn => {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+};
+const notify = () => listeners.forEach(fn => fn());
+
 // Fire-and-forget server sync — optimistic UI keeps the local copy; a failed
 // sync surfaces on the next hydration rather than blocking the interaction.
+// pendingSyncs lets hydration skip applying a server snapshot fetched while a
+// mutation was still in flight (it would briefly revert the optimistic UI).
+let pendingSyncs = 0;
 const sync = promise => {
-  promise.then(({ error }) => {
-    if (error) console.error('[suggestions] sync failed:', error);
-  });
+  pendingSyncs++;
+  promise
+    .then(({ error }) => {
+      if (error) console.error('[suggestions] sync failed:', error);
+    })
+    .finally(() => {
+      pendingSyncs--;
+    });
 };
 
 // Fetch the board from the server, replacing the in-memory copy.
 export async function hydrateSuggestions() {
   if (!API_ENABLED) return loadSuggestions();
   const { data, error } = await listSuggestions();
-  if (!error && data?.suggestions) {
+  if (!error && data?.suggestions && pendingSyncs === 0) {
     MEMORY = data.suggestions;
+    notify();
   }
   return MEMORY.slice();
 }
@@ -131,14 +150,17 @@ export function loadSuggestions() {
 function save(list) {
   if (API_ENABLED) {
     MEMORY = list;
+    notify();
     return list;
   }
-  if (!safeLocal) return list;
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(list));
-  } catch {
-    /* quota (e.g. large image data URLs) — drop silently */
+  if (safeLocal) {
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify(list));
+    } catch {
+      /* quota (e.g. large image data URLs) — drop silently */
+    }
   }
+  notify();
   return list;
 }
 
@@ -201,6 +223,7 @@ export async function submitSuggestion(fields) {
   });
   if (error) return { error };
   MEMORY = [data, ...MEMORY.filter(s => s.id !== data.id)];
+  notify();
   return { error: null, data };
 }
 

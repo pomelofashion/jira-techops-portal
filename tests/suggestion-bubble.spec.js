@@ -63,6 +63,34 @@ test.describe('Feedback bubble → Suggestions board', () => {
     await expect(page.locator('text=📍 Documentation').first()).toBeVisible();
   });
 
+  test('posting from the bubble while ON the board shows up without a refresh', async ({
+    page,
+  }) => {
+    const liveStamp = `Live board e2e ${Date.now()}`;
+    await login(page, USER);
+    await page.goto('/#suggestions');
+    await expect(page.locator('text=Suggestions').first()).toBeVisible({ timeout: 10_000 });
+
+    // Post through the bubble while the board is open — the exact scenario
+    // that previously required a manual refresh.
+    await page.click('button[aria-label="Send feedback"]');
+    await page.fill('input[aria-label="Feedback header"]', liveStamp);
+    await page.fill('textarea[aria-label="Feedback comment"]', 'Should appear instantly.');
+    await page.click('button:has-text("Send feedback")');
+    await expect(page.locator('text=Thanks — your suggestion was posted')).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.click('button[aria-label="Close feedback"]');
+
+    // No reload — the board already shows the new post.
+    await expect(page.locator(`text=${liveStamp}`).first()).toBeVisible({ timeout: 5_000 });
+
+    // Cleanup (author delete).
+    const list = await (await page.request.get('/api/suggestions')).json();
+    const mine = (list.suggestions || []).find(s => s.title === liveStamp);
+    if (mine) await page.request.delete(`/api/suggestions/${mine.id}`);
+  });
+
   test('admin sees the post on the shared board, gets a bell, can set status', async ({
     page,
   }) => {

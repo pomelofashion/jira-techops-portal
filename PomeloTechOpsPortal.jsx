@@ -9643,8 +9643,8 @@ function MyTicketsPage({ role, currentUser, openTicketKey, onOpenedTicket }) {
 // tickets.status_change_own.
 function DeveloperPortalPage({ currentUser }) {
   const can = useCan();
-  const [, _setTicketsVersion] = useState(0);
-  useEffect(() => subscribeTickets(_setTicketsVersion), []);
+  const [ticketsVersion, setTicketsVersion] = useState(0);
+  useEffect(() => subscribeTickets(setTicketsVersion), []);
   const [selectedId, setSelectedId] = useState(null);
   const { addNotification } = useNotifications();
 
@@ -9658,7 +9658,9 @@ function DeveloperPortalPage({ currentUser }) {
       if (t.assigneeEmail) return t.assigneeEmail.toLowerCase() === email;
       return t.assignee && t.assignee.toLowerCase() === name;
     });
-  }, [tickets, currentUser?.email, currentUser?.name]);
+    // ticketsVersion keys the memo because MOCK_TICKETS mutates in place —
+    // the array reference alone never changes (same fix as MyTicketsPage).
+  }, [tickets, ticketsVersion, currentUser?.email, currentUser?.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stats = useMemo(() => {
     const open = mine.filter(t => !DONE_STATUSES.has(t.status));

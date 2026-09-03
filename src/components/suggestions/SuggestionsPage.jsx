@@ -28,6 +28,7 @@ import { SEED_ROLES } from '../../rbac.js';
 import {
   loadSuggestions,
   hydrateSuggestions,
+  subscribeSuggestions,
   createSuggestion,
   voteSuggestion,
   setStatus,
@@ -931,14 +932,20 @@ function Composer({ onClose, onCreate }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function SuggestionsPage({ currentUser, can, onToast }) {
   const [items, setItems] = useState(loadSuggestions);
-  // Backend mode: pull the shared board from the server on mount.
+  // Live board: subscribe to store changes (feedback-bubble posts, background
+  // re-syncs), hydrate from the server on mount, and re-sync every 30s while
+  // open so other users' posts and votes appear without a manual refresh.
   useEffect(() => {
+    const unsubscribe = subscribeSuggestions(() => setItems(loadSuggestions()));
     let cancelled = false;
     hydrateSuggestions().then(list => {
       if (!cancelled) setItems(list);
     });
+    const timer = setInterval(() => hydrateSuggestions(), 30_000);
     return () => {
       cancelled = true;
+      unsubscribe();
+      clearInterval(timer);
     };
   }, []);
   const [sort, setSort] = useState('hot'); // hot | new | top
