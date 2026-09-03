@@ -48,7 +48,7 @@ import changesRouter from './routes/changes.js';
 import csatRouter from './routes/csat.js';
 import reportsRouter from './routes/reports.js';
 import spacesRouter from './routes/spaces.js';
-import { startSlaSweeper } from './lib/slaSweeper.js';
+import { startAutomationEngine } from './lib/automationEngine.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: resolve(__dirname, '..', '.env.local') });
@@ -164,11 +164,11 @@ if (dbEnabled) {
   // persistent server (not on Vercel). On Vercel the sweeper runs via cron
   // hitting /api/cron/sla-sweep instead.
   if (!process.env.VERCEL) {
-    startSlaSweeper();
+    startAutomationEngine();
   }
   console.log(
     '[BFF] DB-backed routes mounted: /api/auth, /api/tickets, /api/users, /api/roles, /api/audit, /api/docs, /api/request-types, /api/sla, /api/notifications' +
-      (process.env.VERCEL ? '' : ' (SLA sweeper on)')
+      (process.env.VERCEL ? '' : ' (automation engine on)')
   );
 }
 

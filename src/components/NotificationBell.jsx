@@ -18,6 +18,14 @@ const TYPE_META = {
   approval_decided: { icon: '✅', color: '#16A34A', bg: 'rgba(22, 163, 74, 0.10)' },
   major_incident: { icon: '📢', color: '#DC2626', bg: 'rgba(220, 38, 38, 0.10)' },
   csat_prompt: { icon: '⭐', color: '#D97706', bg: 'rgba(245, 158, 11, 0.10)' },
+  suggestion: { icon: '💡', color: '#6366F1', bg: 'var(--accent-soft)' },
+  // Automation engine
+  assigned: { icon: '🎯', color: 'var(--accent-primary)', bg: 'var(--accent-soft)' },
+  sla_escalated: { icon: '🚨', color: '#DC2626', bg: 'rgba(220, 38, 38, 0.10)' },
+  waiting_nudge: { icon: '⏰', color: '#D97706', bg: 'rgba(245, 158, 11, 0.10)' },
+  auto_closed: { icon: '📪', color: 'var(--text-muted)', bg: 'var(--bg-hover)' },
+  stale_nudge: { icon: '🕸️', color: '#D97706', bg: 'rgba(245, 158, 11, 0.10)' },
+  digest: { icon: '📊', color: '#0EA5E9', bg: 'rgba(14, 165, 233, 0.10)' },
 };
 
 export default function NotificationBell({ onNavigate }) {
@@ -49,6 +57,7 @@ export default function NotificationBell({ onNavigate }) {
     if (n.ticketId && onNavigate) onNavigate('mytickets', n.ticketId);
     else if (n.docId && onNavigate) onNavigate('docs', n.docId);
     else if (n.type === 'suggestion' && onNavigate) onNavigate('suggestions');
+    else if (n.type === 'digest' && onNavigate) onNavigate('reports');
   };
 
   return (

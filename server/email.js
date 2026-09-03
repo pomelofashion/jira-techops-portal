@@ -236,3 +236,26 @@ export function sendResetEmail(to, token) {
     ),
   });
 }
+
+// ─── Automation senders ───────────────────────────────────────────────────────
+// Assignment: tell a developer a ticket was routed to them (assignment used to
+// be silent).
+export function sendAssignmentEmail(to, ticketKey, ticketTitle, assignedBy) {
+  const href = `${APP_URL}/#mytickets`;
+  return deliver({
+    to,
+    subject: `Assigned to you: ${ticketKey}`,
+    html: wrap(
+      'A ticket was assigned to you',
+      `<b>${esc(ticketKey)}</b> — ${esc(ticketTitle)}<br/>Assigned by ${esc(assignedBy)}.`,
+      { href, label: 'View your tickets' }
+    ),
+  });
+}
+
+// Generic sender for scheduled-automation notices (Waiting-for-Customer nudge
+// and auto-close, stale-WIP nudge, SLA escalation, admin digest). heading/body
+// are pre-built HTML-safe strings; cta is optional.
+export function sendAutomationEmail(to, subject, heading, body, cta) {
+  return deliver({ to, subject, html: wrap(heading, body, cta) });
+}

@@ -28,6 +28,7 @@ import {
   sendStatusChangeEmail,
   sendReplyEmail,
   sendMentionEmail,
+  sendAssignmentEmail,
 } from '../email.js';
 import {
   computeDueDates,
@@ -1125,6 +1126,21 @@ router.post('/:id/assign', async (req, res, next) => {
       req.user.email,
     ]);
     await writeAudit(req.user.email, 'ticket.assign', ticket.key, { assigneeEmail: email });
+    // Tell the new assignee — assignment used to be silent. Skip self-assign
+    // (you already know) and unassignment.
+    if (email && email !== req.user.email) {
+      await query(
+        `INSERT INTO notifications (user_email, type, title, body, ticket_id)
+         VALUES ($1,'assigned',$2,$3,$4)`,
+        [
+          email,
+          `Assigned to you: ${ticket.key}`,
+          `${ticket.title} — assigned by ${req.user.name}.`,
+          ticket.id,
+        ]
+      );
+      sendAssignmentEmail(email, ticket.key, ticket.title, req.user.name).catch(() => {});
+    }
     res.json(serializeTicket(rows[0]));
   } catch (err) {
     next(err);
