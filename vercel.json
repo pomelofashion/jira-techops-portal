@@ -45,7 +45,7 @@
   "crons": [
     {
       "path": "/api/cron/automation",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 7 * * *"
     },
     {
       "path": "/api/cron/digest",
