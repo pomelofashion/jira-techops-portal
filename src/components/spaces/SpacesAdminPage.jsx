@@ -124,8 +124,11 @@ function MembersPanel({ title, members, users, onSet, onRemove }) {
   );
 }
 
-export default function SpacesAdminPage({ onToast, onSpacesChanged }) {
+export default function SpacesAdminPage({ onToast, onSpacesChanged, isSuperadmin = false }) {
   const [spaces, setSpaces] = useState([]);
+  // Two-step confirm for the destructive superadmin deletes:
+  // { kind: 'space'|'board', id } — cleared on any other click.
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [users, setUsers] = useState([]);
   const [openSpaceId, setOpenSpaceId] = useState(null);
   const [spaceMembers, setSpaceMembers] = useState({}); // spaceId → members[]
@@ -260,6 +263,29 @@ export default function SpacesAdminPage({ onToast, onSpacesChanged }) {
             >
               {space.archived ? 'Restore' : 'Archive'}
             </button>
+            {isSuperadmin &&
+              (confirmDelete?.kind === 'space' && confirmDelete.id === space.id ? (
+                <button
+                  style={{ ...smallBtn, background: '#DC2626', color: '#fff', border: 'none' }}
+                  onClick={async () => {
+                    setConfirmDelete(null);
+                    const r = await spacesApi.deleteSpace(space.id);
+                    if (r.error) return toast(r.error, 'error');
+                    toast(`Space "${space.name}" deleted.`);
+                    reload();
+                  }}
+                >
+                  Confirm delete
+                </button>
+              ) : (
+                <button
+                  style={{ ...smallBtn, color: '#DC2626' }}
+                  title="Delete this space permanently (must contain no boards)"
+                  onClick={() => setConfirmDelete({ kind: 'space', id: space.id })}
+                >
+                  Delete
+                </button>
+              ))}
           </div>
 
           {/* Create board form */}
@@ -409,6 +435,39 @@ export default function SpacesAdminPage({ onToast, onSpacesChanged }) {
                   >
                     {b.archived ? 'Restore' : 'Archive'}
                   </button>
+                  {isSuperadmin &&
+                    b.key !== 'PESD1' &&
+                    (confirmDelete?.kind === 'board' && confirmDelete.id === b.id ? (
+                      <button
+                        style={{
+                          ...smallBtn,
+                          background: '#DC2626',
+                          color: '#fff',
+                          border: 'none',
+                        }}
+                        onClick={async () => {
+                          setConfirmDelete(null);
+                          const r = await spacesApi.deleteBoard(space.id, b.id);
+                          if (r.error) return toast(r.error, 'error');
+                          toast(
+                            r.data?.ticketsMoved
+                              ? `Board ${b.key} deleted — ${r.data.ticketsMoved} ticket(s) moved to the default board.`
+                              : `Board ${b.key} deleted.`
+                          );
+                          reload();
+                        }}
+                      >
+                        Confirm delete
+                      </button>
+                    ) : (
+                      <button
+                        style={{ ...smallBtn, color: '#DC2626' }}
+                        title="Delete this board permanently — its tickets move to the default board"
+                        onClick={() => setConfirmDelete({ kind: 'board', id: b.id })}
+                      >
+                        Delete
+                      </button>
+                    ))}
                 </div>
                 {openBoardId === b.id && (
                   <div style={{ marginTop: '10px' }}>

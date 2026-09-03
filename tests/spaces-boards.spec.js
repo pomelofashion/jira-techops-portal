@@ -124,3 +124,61 @@ test.describe('Spaces & Boards', () => {
     );
   });
 });
+
+// ─── Superadmin-only deletion ─────────────────────────────────────────────────
+const ADMIN2 = { email: 'e2e-admin2@example.local', password: 'E2e-Pass-1' }; // role_admin
+
+test.describe('Space/board deletion (superadmin only)', () => {
+  test.skip(!ADMIN.email, 'Admin credentials not configured');
+
+  test('superadmin deletes a board then its space through the admin UI', async ({ page }) => {
+    await login(page, ADMIN);
+    // Scratch space + board via API (faster than clicking the forms).
+    const sp = await (
+      await page.request.post('/api/spaces', { data: { name: `Doomed Space ${Date.now()}` } })
+    ).json();
+    await page.request.post(`/api/spaces/${sp.id}/boards`, {
+      data: { name: 'Doomed Board', key: 'DOOM' },
+    });
+
+    await page.goto('/#spaces-admin');
+    const spaceCard = page
+      .locator('div')
+      .filter({ hasText: sp.name })
+      .filter({ has: page.locator('button:has-text("Archive")') })
+      .last();
+    await expect(page.locator(`text=${sp.name}`).first()).toBeVisible({ timeout: 10_000 });
+
+    // Delete the board first (two-step confirm), then the now-empty space.
+    // (The "space still has boards" 409 guard is covered by the API tests.)
+    const boardRow = page
+      .locator('div')
+      .filter({ hasText: 'DOOM' })
+      .filter({ has: page.locator('button:has-text("Archive")') })
+      .last();
+    await boardRow.locator('button:has-text("Delete")').first().click();
+    await boardRow.locator('button:has-text("Confirm delete")').first().click();
+    await expect(page.locator('text=Board DOOM deleted').first()).toBeVisible({ timeout: 5_000 });
+
+    await spaceCard.locator('button:has-text("Delete")').first().click();
+    await spaceCard.locator('button:has-text("Confirm delete")').first().click();
+    await expect(page.locator(`text=Space "${sp.name}" deleted`).first()).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(page.locator(`text=${sp.name}`)).toHaveCount(0);
+  });
+
+  test('non-superadmin sees no Delete buttons and the API refuses', async ({ page }) => {
+    await login(page, ADMIN2); // role_admin — has spaces.manage but is not superadmin
+    await page.goto('/#spaces-admin');
+    await expect(page.locator('button:has-text("Archive")').first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator('button:has-text("Confirm delete")')).toHaveCount(0);
+    // API-level enforcement (UI hiding alone is not security).
+    const spaces = await (await page.request.get('/api/spaces?all=1')).json();
+    const anySpace = (spaces.spaces || [])[0];
+    const res = await page.request.delete(`/api/spaces/${anySpace.id}`);
+    expect(res.status()).toBe(403);
+  });
+});

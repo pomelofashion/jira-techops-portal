@@ -44,3 +44,11 @@ export const removeBoardMember = (spaceId, boardId, userId) =>
     async () =>
       (await api.delete(`/api/spaces/${spaceId}/boards/${boardId}/members/${userId}`)).data
   );
+
+// Superadmin only. Space must contain no boards.
+export const deleteSpace = spaceId =>
+  wrap(async () => (await api.delete(`/api/spaces/${spaceId}`)).data);
+
+// Superadmin only. The board's tickets move to the default board (PESD1).
+export const deleteBoard = (spaceId, boardId) =>
+  wrap(async () => (await api.delete(`/api/spaces/${spaceId}/boards/${boardId}`)).data);

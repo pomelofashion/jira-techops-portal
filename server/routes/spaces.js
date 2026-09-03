@@ -12,7 +12,7 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { query } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { requireAuth, requireCapability, writeAudit } from '../auth.js';
 import { isSpaceAdmin, isBoardAdmin } from '../lib/spacesAccess.js';
 
@@ -173,6 +173,69 @@ router.patch('/:id', requireCapability('spaces.manage'), async (req, res, next) 
     if (!rows.length) return res.status(404).json({ error: 'Space not found.' });
     await writeAudit(req.user.email, 'space.update', rows[0].slug, d);
     res.json(serializeSpace(rows[0], [], req.user.spaceRoles?.[rows[0].id] || null));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Deleting spaces/boards is a superadmin-tier action — a role check, not a
+// capability, so it can't be acquired by toggling capabilities on a custom
+// role (same reasoning as ticket-conversation privacy).
+const isSuperadmin = user => user.roleId === 'role_superadmin';
+
+// ─── Delete space (superadmin only; must contain no boards) ───────────────────
+// boards.space_id is ON DELETE CASCADE, so an unguarded delete would silently
+// destroy every board in the space — we refuse instead until it is empty.
+router.delete('/:id', async (req, res, next) => {
+  try {
+    if (!isSuperadmin(req.user))
+      return res.status(403).json({ error: 'Only a superadmin can delete a space.' });
+    const cur = await query('SELECT * FROM spaces WHERE id=$1', [req.params.id]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'Space not found.' });
+    const boards = await query('SELECT count(*)::int AS n FROM boards WHERE space_id=$1', [
+      req.params.id,
+    ]);
+    if (boards.rows[0].n > 0)
+      return res.status(409).json({
+        error: `This space still contains ${boards.rows[0].n} board(s). Delete or move them first.`,
+      });
+    await query('DELETE FROM spaces WHERE id=$1', [req.params.id]);
+    await writeAudit(req.user.email, 'space.delete', cur.rows[0].slug);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Delete board (superadmin only) ───────────────────────────────────────────
+// Tickets are never destroyed: they move to the default board (PESD1) inside
+// the same transaction, keeping their already-minted keys. The default board
+// itself is undeletable — it is where routing falls back to.
+router.delete('/:id/boards/:boardId', async (req, res, next) => {
+  try {
+    if (!isSuperadmin(req.user))
+      return res.status(403).json({ error: 'Only a superadmin can delete a board.' });
+    const cur = await query('SELECT * FROM boards WHERE id=$1 AND space_id=$2', [
+      req.params.boardId,
+      req.params.id,
+    ]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'Board not found.' });
+    const board = cur.rows[0];
+    if (board.key === 'PESD1')
+      return res.status(409).json({ error: 'The default board (PESD1) cannot be deleted.' });
+
+    const moved = await withTransaction(async client => {
+      const def = await client.query(`SELECT id FROM boards WHERE key='PESD1' LIMIT 1`);
+      const defaultId = def.rows[0]?.id || null;
+      const upd = await client.query('UPDATE tickets SET board_id=$1 WHERE board_id=$2', [
+        defaultId,
+        req.params.boardId,
+      ]);
+      await client.query('DELETE FROM boards WHERE id=$1', [req.params.boardId]);
+      return upd.rowCount;
+    });
+    await writeAudit(req.user.email, 'board.delete', board.key, { ticketsMoved: moved });
+    res.json({ ok: true, ticketsMoved: moved });
   } catch (err) {
     next(err);
   }

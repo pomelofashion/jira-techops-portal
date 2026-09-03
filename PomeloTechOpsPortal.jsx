@@ -15074,6 +15074,7 @@ function AppContent() {
           <SpacesAdminPage
             onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
             onSpacesChanged={reloadSpaces}
+            isSuperadmin={effectiveUser?.roleId === 'role_superadmin'}
           />
         ) : (
           <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
