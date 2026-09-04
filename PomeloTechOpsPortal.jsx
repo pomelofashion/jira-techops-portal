@@ -3905,6 +3905,58 @@ function renderWithMentions(text, mentions) {
     );
 }
 
+// Renders a ticket description that may contain catalog form answers. The
+// catalog form stores each custom field as "**Label**\nvalue", so a line that
+// is entirely **bold** renders as a large header and the lines under it become
+// the answer body. Plain descriptions (no ** markers) render as a paragraph.
+function renderRichDescription(text) {
+  const lines = String(text || '').split('\n');
+  const out = [];
+  let para = [];
+  const flush = () => {
+    const body = para.join('\n').trim();
+    para = [];
+    if (body) {
+      out.push(
+        <div
+          key={`p-${out.length}`}
+          style={{
+            fontSize: '14px',
+            color: 'var(--text-secondary)',
+            lineHeight: 1.7,
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {body}
+        </div>
+      );
+    }
+  };
+  lines.forEach(line => {
+    const m = line.match(/^\s*\*\*(.+?)\*\*\s*$/);
+    if (m) {
+      flush();
+      out.push(
+        <div
+          key={`h-${out.length}`}
+          style={{
+            fontSize: '16px',
+            fontWeight: 800,
+            color: 'var(--text-primary)',
+            margin: out.length ? '18px 0 8px' : '0 0 8px',
+          }}
+        >
+          {m[1]}
+        </div>
+      );
+    } else {
+      para.push(line);
+    }
+  });
+  flush();
+  return out;
+}
+
 function TicketDetail({
   ticket,
   onBack,
@@ -4628,16 +4680,11 @@ function TicketDetail({
             style={{ ...S.textarea, fontSize: '14px', minHeight: '120px', lineHeight: 1.7 }}
           />
         ) : (
-          <div
-            style={{
-              fontSize: '14px',
-              color: 'var(--text-secondary)',
-              lineHeight: 1.7,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {ticket.description || (
-              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          <div>
+            {ticket.description ? (
+              renderRichDescription(ticket.description)
+            ) : (
+              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '14px' }}>
                 No description provided.
               </span>
             )}
