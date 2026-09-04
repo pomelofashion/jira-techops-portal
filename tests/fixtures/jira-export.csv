@@ -1,0 +1,4 @@
+Summary,Issue key,Issue Type,Status,Priority,Assignee,Assignee Id,Reporter,Reporter Id,Created,Updated,Resolved,Description,Labels,Labels,Due date
+"Login page throws 500","PESD-1001","Bug","In Progress","Highest","Alex Lee","alex.lee@pomelo.com","Kai Nguyen","kai.nguyen@pomelo.com","12/Aug/24 3:45 PM","20/Aug/24 9:00 AM","","Users see a 500 on submit, needs fix","auth","backend","30/Aug/24 12:00 AM"
+"Update onboarding docs","PESD-1002","Story","Done","Low","","","Prim S","prim@pomelo.com","01/Jul/24 10:00 AM","15/Jul/24 4:00 PM","15/Jul/24 4:00 PM","Docs are stale, refresh the VPN section","docs","","",
+"Add dark mode","PESD-1003","Task","Backlog","Medium","Dev One","dev@pomelo.com","Kai Nguyen","kai.nguyen@pomelo.com","2024-06-01T09:00:00.000Z","2024-06-02T09:00:00.000Z","","Support dark mode across the app","","","",

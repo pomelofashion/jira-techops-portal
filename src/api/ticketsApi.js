@@ -4,7 +4,7 @@
 // app shell, branched at the call-site via API_ENABLED (src/api/client.js).
 // Every function returns { data, error }.
 
-import { api, wrap } from './client.js';
+import { api, wrap, BASE_URL } from './client.js';
 
 // list({ status, priority, assignee, search, limit, offset })
 // → { tickets: [...], total }
@@ -72,3 +72,16 @@ export const watchTicket = id =>
 
 export const unwatchTicket = id =>
   wrap(async () => (await api.delete(`/api/tickets/${id}/watchers/me`)).data);
+
+// Bulk import mapped Jira rows (batches of <=200). Requires system.export_data.
+export const importTickets = (boardId, tickets) =>
+  wrap(async () => (await api.post('/api/tickets/import', { boardId, tickets })).data);
+
+// Session-authed CSV download link (all tickets, or a board/status filter).
+export const ticketsCsvUrl = ({ boardId, status } = {}) => {
+  const qs = new URLSearchParams();
+  if (boardId) qs.set('boardId', boardId);
+  if (status) qs.set('status', status);
+  const q = qs.toString();
+  return `${BASE_URL}/api/tickets/export.csv${q ? `?${q}` : ''}`;
+};

@@ -9,6 +9,7 @@ import {
   Component,
 } from 'react';
 import DocImportExportPage from './src/components/docs/DocImportExportPage.jsx';
+import TicketImportExportPage from './src/components/io/TicketImportExportPage.jsx';
 import DocStudioPage from './src/components/docs/studio/DocStudioPage.jsx';
 import SuggestionsPage from './src/components/suggestions/SuggestionsPage.jsx';
 import ServiceCatalogPage from './src/components/catalog/ServiceCatalogPage.jsx';
@@ -124,6 +125,7 @@ import {
   SearchCheck,
   GitBranch,
   BarChart3,
+  ArrowLeftRight,
 } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
@@ -13664,6 +13666,7 @@ const SECTION_LABELS = {
   admin: 'Admin Console',
   'catalog-admin': 'Service Catalog',
   'spaces-admin': 'Spaces & Boards',
+  'import-export': 'Import / Export',
   reports: 'Reports',
   roles: 'Roles & Access',
   users: 'Users',
@@ -14225,6 +14228,7 @@ const WIDE_SECTIONS = new Set([
   'problems',
   'changes',
   'reports',
+  'import-export',
 ]);
 
 // Sections that use the FULL remaining width (edge to edge, like a workspace).
@@ -14251,12 +14255,14 @@ const VALID_SECTIONS = new Set([
   'board',
   'catalog-admin',
   'spaces-admin',
+  'import-export',
   'approvals',
   'assets',
   'incidents',
   'problems',
   'changes',
   'reports',
+  'import-export',
 ]);
 const sectionFromHash = () => {
   const h = window.location.hash.replace('#', '');
@@ -14311,6 +14317,13 @@ const ADMIN_TOOLS = [
     label: 'Spaces & Boards',
     hint: 'Team spaces, boards, membership',
     cap: 'spaces.manage',
+  },
+  {
+    id: 'import-export',
+    Icon: ArrowLeftRight,
+    label: 'Import / Export',
+    hint: 'Migrate tickets from Jira; export to CSV',
+    cap: 'system.export_data',
   },
   {
     id: 'reports',
@@ -14915,6 +14928,7 @@ function AppContent() {
       devportal: 'tickets.view_assigned',
       'catalog-admin': 'catalog.manage',
       'spaces-admin': 'spaces.manage',
+      'import-export': 'system.export_data',
       assets: 'assets.view',
       incidents: 'tickets.view_all',
       problems: 'tickets.view_all',
@@ -15075,6 +15089,15 @@ function AppContent() {
             onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
             onSpacesChanged={reloadSpaces}
             isSuperadmin={effectiveUser?.roleId === 'role_superadmin'}
+          />
+        ) : (
+          <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
+        );
+        break;
+      case 'import-export':
+        page = can('system.export_data') ? (
+          <TicketImportExportPage
+            onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
           />
         ) : (
           <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />

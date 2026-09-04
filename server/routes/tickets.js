@@ -21,7 +21,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db.js';
-import { requireAuth, writeAudit, makeToken, hashToken } from '../auth.js';
+import { requireAuth, requireCapability, writeAudit, makeToken, hashToken } from '../auth.js';
 import {
   sendCsatEmail,
   sendTicketCreatedEmail,
@@ -305,6 +305,183 @@ async function loadLinks(ticketId) {
     ticket: summarizeLinked(r),
   }));
 }
+
+// ─── CSV export (admin) ───────────────────────────────────────────────────────
+// Exports plain tickets to CSV for backup / portability. Optional board and
+// status filters. Reuses the quote-aware escaping used by the assets export.
+router.get('/export.csv', requireCapability('system.export_data'), async (req, res, next) => {
+  try {
+    const where = [`t.record_type = 'ticket'`];
+    const params = [];
+    if (req.query.boardId) {
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.query.boardId)
+      )
+        return res.status(400).json({ error: 'Invalid boardId.' });
+      params.push(req.query.boardId);
+      where.push(`t.board_id = $${params.length}`);
+    }
+    if (req.query.status) {
+      params.push(req.query.status);
+      where.push(`t.status = $${params.length}`);
+    }
+    const { rows } = await query(
+      `SELECT t.*, b.key AS board_key
+         FROM tickets t LEFT JOIN boards b ON b.id = t.board_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY t.created_at ASC`,
+      params
+    );
+    const cols = [
+      'key',
+      'jira_key',
+      'title',
+      'description',
+      'status',
+      'priority',
+      'category',
+      'issue_type',
+      'requester_name',
+      'requester_email',
+      'assignee_name',
+      'assignee_email',
+      'labels',
+      'board_key',
+      'created_at',
+      'updated_at',
+      'resolved_at',
+      'due_date',
+    ];
+    const esc = v => {
+      if (v === null || v === undefined) return '';
+      if (Array.isArray(v)) v = v.join('; ');
+      const s = v instanceof Date ? v.toISOString() : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="tickets.csv"');
+    res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Bulk import (admin) — Jira migration ─────────────────────────────────────
+// Accepts already-mapped ticket rows (the client maps a Jira CSV export and
+// previews before sending, in batches of 50). Each row is created with a fresh
+// board key while its original Jira key is preserved in jira_key for dedup and
+// traceability. Original timestamps and status are kept verbatim — this is a
+// direct insert, deliberately bypassing the create path's now()/'To Do'/notify
+// behaviour. No SLA deadlines are stamped (imported history must not spam
+// breach alerts) and no notifications fire.
+const importRowSchema = z
+  .object({
+    jiraKey: z.string().min(1).max(60),
+    title: z.string().min(1).max(500),
+    description: z.string().max(50000).default(''),
+    status: z.string().max(60).default('To Do'),
+    priority: z.enum(['Critical', 'High', 'Medium', 'Low']).default('Medium'),
+    issueType: z.enum(['Task', 'Bug', 'Support Request', 'Incident', 'Sub-task']).default('Task'),
+    category: z.string().max(120).nullable().default(null),
+    requesterName: z.string().max(200).nullable().default(null),
+    requesterEmail: z.string().max(254).nullable().default(null),
+    assigneeName: z.string().max(200).nullable().default(null),
+    assigneeEmail: z.string().max(254).nullable().default(null),
+    labels: z.array(z.string().max(120)).max(50).default([]),
+    dueDate: z.string().max(40).nullable().default(null),
+    createdAt: z.string().max(40).nullable().default(null),
+    updatedAt: z.string().max(40).nullable().default(null),
+    resolvedAt: z.string().max(40).nullable().default(null),
+  })
+  .strict();
+
+router.post('/import', requireCapability('system.export_data'), async (req, res, next) => {
+  try {
+    const schema = z
+      .object({
+        boardId: z.string().uuid(),
+        tickets: z.array(importRowSchema).min(1).max(200),
+      })
+      .strict();
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
+    const { boardId, tickets } = parsed.data;
+
+    const board = await query('SELECT id, key FROM boards WHERE id=$1 AND archived=FALSE', [
+      boardId,
+    ]);
+    if (!board.rows.length) return res.status(400).json({ error: 'Unknown or archived board.' });
+
+    const results = [];
+    let created = 0;
+    await withTransaction(async client => {
+      for (const row of tickets) {
+        try {
+          const dup = await client.query('SELECT key FROM tickets WHERE jira_key=$1 LIMIT 1', [
+            row.jiraKey,
+          ]);
+          if (dup.rows.length) {
+            results.push({ jiraKey: row.jiraKey, status: 'skipped', key: dup.rows[0].key });
+            continue;
+          }
+          const seq = await client.query(
+            'UPDATE boards SET next_seq = next_seq + 1 WHERE id=$1 RETURNING key, next_seq',
+            [boardId]
+          );
+          const key = `${seq.rows[0].key}-${seq.rows[0].next_seq - 1}`;
+          const isDone = ['Live', "Closed - Won't Do", 'Resolved', 'Done', 'Closed'].includes(
+            row.status
+          );
+          const resolvedAt = row.resolvedAt || (isDone ? row.updatedAt : null);
+          const ins = await client.query(
+            `INSERT INTO tickets
+               (key, jira_key, title, description, category, priority, status,
+                requester_name, requester_email, assignee_name, assignee_email,
+                labels, due_date, issue_type, jira_sync_state, board_id,
+                record_type, created_at, updated_at, resolved_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,'local-only',$15,
+                     'ticket', COALESCE($16::timestamptz, now()), COALESCE($17::timestamptz, now()),
+                     $18::timestamptz)
+             RETURNING id`,
+            [
+              key,
+              row.jiraKey,
+              row.title,
+              row.description,
+              row.category,
+              row.priority,
+              row.status,
+              row.requesterName,
+              row.requesterEmail ? row.requesterEmail.toLowerCase() : null,
+              row.assigneeName,
+              row.assigneeEmail ? row.assigneeEmail.toLowerCase() : null,
+              JSON.stringify(row.labels),
+              row.dueDate,
+              row.issueType,
+              boardId,
+              row.createdAt,
+              row.updatedAt,
+              resolvedAt,
+            ]
+          );
+          await client.query(
+            'INSERT INTO ticket_timeline (ticket_id, action, actor) VALUES ($1,$2,$3)',
+            [ins.rows[0].id, `Imported from Jira ${row.jiraKey}`, 'import@system']
+          );
+          results.push({ jiraKey: row.jiraKey, status: 'created', key });
+          created++;
+        } catch (rowErr) {
+          results.push({ jiraKey: row.jiraKey, status: 'error', error: rowErr.message });
+        }
+      }
+    });
+    await writeAudit(req.user.email, 'ticket.import', `${created} tickets → ${board.rows[0].key}`);
+    res.status(201).json({ ok: true, created, results });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/:id', async (req, res, next) => {
   try {
