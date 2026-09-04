@@ -94,3 +94,7 @@ export const ticketsCsvUrl = ({ boardId, status } = {}) => {
   const q = qs.toString();
   return `${BASE_URL}/api/tickets/export.csv${q ? `?${q}` : ''}`;
 };
+
+// Bulk action over ticket ids: {type:'status',status} | {type:'assign',assigneeEmail,assigneeName} | {type:'move',boardId}
+export const bulkUpdateTickets = (ids, action) =>
+  wrap(async () => (await api.post('/api/tickets/bulk', { ids, action }, { timeout: 60000 })).data);

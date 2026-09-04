@@ -525,6 +525,141 @@ router.post('/import', requireCapability('system.export_data'), async (req, res,
   }
 });
 
+// ─── Bulk operations (Ticket Manager) ─────────────────────────────────────────
+// One endpoint for bulk status change / assignment / board move over a set of
+// ticket ids. Done in a few bulk queries (not per-row) so hundreds of tickets
+// stay well under the function timeout. Deliberately quieter than the
+// single-ticket paths: DB-level SLA transitions are applied, but milestone
+// emails / CSAT are skipped (bulk admin action); bulk assign sends ONE
+// notification per distinct new assignee, not one per ticket.
+router.post('/bulk', async (req, res, next) => {
+  try {
+    const schema = z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(500),
+        action: z.discriminatedUnion('type', [
+          z.object({ type: z.literal('status'), status: z.string().min(1).max(60) }).strict(),
+          z
+            .object({
+              type: z.literal('assign'),
+              assigneeEmail: z.string().email().max(254).nullable(),
+              assigneeName: z.string().max(120).nullable().optional(),
+            })
+            .strict(),
+          z.object({ type: z.literal('move'), boardId: z.string().uuid() }).strict(),
+        ]),
+      })
+      .strict();
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
+    const { ids, action } = parsed.data;
+
+    // Capability + validity per action.
+    if (action.type === 'status' && !can(req.user, 'tickets.status_change_any'))
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    if (
+      (action.type === 'assign' || action.type === 'move') &&
+      !can(req.user, 'tickets.reassign_any')
+    )
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    if (action.type === 'move') {
+      const b = await query('SELECT id FROM boards WHERE id=$1 AND archived=FALSE', [
+        action.boardId,
+      ]);
+      if (!b.rows.length) return res.status(400).json({ error: 'Unknown or archived board.' });
+      if (!canSubmitToBoard(req.user, action.boardId))
+        return res.status(403).json({ error: 'No access to the destination board.' });
+    }
+
+    let updated = 0;
+    let timelineAction = '';
+    await withTransaction(async client => {
+      // Only plain tickets, only the ids given.
+      const scope = `id = ANY($1) AND record_type = 'ticket'`;
+      if (action.type === 'status') {
+        const isDone = SLA_DONE_STATUSES.has(action.status);
+        const isPaused = SLA_PAUSED_STATUSES.has(action.status);
+        const r = await client.query(
+          `UPDATE tickets
+              SET status = $2,
+                  resolved_at = CASE WHEN $3 THEN COALESCE(resolved_at, now()) ELSE NULL END,
+                  sla_paused_at = CASE WHEN $4 THEN COALESCE(sla_paused_at, now()) ELSE NULL END,
+                  updated_at = now()
+            WHERE ${scope}
+          RETURNING id`,
+          [ids, action.status, isDone, isPaused]
+        );
+        updated = r.rowCount;
+        timelineAction = `Status → ${action.status} (bulk)`;
+        await writeAudit(req.user.email, 'ticket.bulk_status', `${updated} tickets`, {
+          status: action.status,
+        });
+      } else if (action.type === 'assign') {
+        const email = action.assigneeEmail ? action.assigneeEmail.toLowerCase() : null;
+        const r = await client.query(
+          `UPDATE tickets SET assignee_email=$2, assignee_name=$3, updated_at=now()
+            WHERE ${scope} RETURNING id, key`,
+          [ids, email, action.assigneeName || null]
+        );
+        updated = r.rowCount;
+        timelineAction = email ? `Assigned to ${email} (bulk)` : 'Unassigned (bulk)';
+        await writeAudit(req.user.email, 'ticket.bulk_assign', `${updated} tickets`, {
+          assigneeEmail: email,
+        });
+        // One summary notification for the new assignee (not per ticket).
+        if (email && email !== req.user.email && updated > 0) {
+          await client.query(
+            `INSERT INTO notifications (user_email, type, title, body)
+             VALUES ($1,'assigned',$2,$3)`,
+            [
+              email,
+              `You were assigned ${updated} ticket(s)`,
+              `${req.user.name} bulk-assigned ${updated} ticket(s) to you.`,
+            ]
+          );
+          sendAssignmentEmail(
+            email,
+            `${updated} tickets`,
+            `${updated} ticket(s) assigned to you`,
+            req.user.name
+          ).catch(() => {});
+        }
+      } else {
+        // move — key is intentionally NOT re-minted.
+        const r = await client.query(
+          `UPDATE tickets SET board_id=$2, updated_at=now() WHERE ${scope} RETURNING id`,
+          [ids, action.boardId]
+        );
+        updated = r.rowCount;
+        const bk = await client.query('SELECT key FROM boards WHERE id=$1', [action.boardId]);
+        timelineAction = `Moved to board ${bk.rows[0]?.key || ''} (bulk)`;
+        await writeAudit(req.user.email, 'ticket.bulk_move', `${updated} tickets`, {
+          boardId: action.boardId,
+        });
+      }
+
+      // One multi-row timeline insert for the affected tickets.
+      if (updated > 0) {
+        const affected = await client.query(`SELECT id FROM tickets WHERE ${scope}`, [ids]);
+        const values = [];
+        const params = [];
+        affected.rows.forEach((row, i) => {
+          const b = i * 3;
+          values.push(`($${b + 1},$${b + 2},$${b + 3})`);
+          params.push(row.id, timelineAction, req.user.email);
+        });
+        await client.query(
+          `INSERT INTO ticket_timeline (ticket_id, action, actor) VALUES ${values.join(',')}`,
+          params
+        );
+      }
+    });
+    res.json({ ok: true, updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const { ticket, notFound, forbidden } = await loadVisible(req, req.params.id);
