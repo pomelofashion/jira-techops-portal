@@ -1404,6 +1404,7 @@ function ArchiveConfirmModal({ count, onCancel, onConfirm, working }) {
 
 // ─── Archived docs list (admin only) ──────────────────────────────────────────
 import { listDocs } from '../../api/docsApi.js';
+import DateField from '../DateField.jsx';
 
 function ArchivedDocsList({ onRestore }) {
   const [archived, setArchived] = useState([]);
@@ -1630,12 +1631,12 @@ function FlagReviewModal({ doc, onClose, onConfirm }) {
             >
               Due date (optional)
             </span>
-            <input
+            <DateField
               aria-label="Due date"
-              type="date"
               value={dueDate}
               onChange={e => setDueDate(e.target.value)}
               style={{
+                width: 'auto',
                 padding: '10px 14px',
                 border: '1.5px solid var(--border-default)',
                 borderRadius: '8px',

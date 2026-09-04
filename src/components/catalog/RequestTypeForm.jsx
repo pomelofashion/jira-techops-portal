@@ -9,6 +9,7 @@ import { ArrowLeft, Send, CheckCircle2 } from 'lucide-react';
 import { S } from '../../lib/styles.js';
 import { createTicket } from '../../api/ticketsApi.js';
 import { catalogIcon } from './catalogIcons.js';
+import DateField from '../DateField.jsx';
 
 const fieldLabel = {
   display: 'block',
@@ -181,9 +182,8 @@ export default function RequestTypeForm({ type, currentUser, onBack, onToast, on
               </select>
             )}
             {f.type === 'date' && (
-              <input
-                type="date"
-                style={{ ...S.input, ...(errors[f.id] ? { borderColor: '#DC2626' } : {}) }}
+              <DateField
+                style={errors[f.id] ? { borderColor: '#DC2626' } : {}}
                 value={values[f.id]}
                 onChange={e => setValue(f.id, e.target.value)}
               />

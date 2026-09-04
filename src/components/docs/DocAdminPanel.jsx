@@ -5,6 +5,7 @@ import { useState, useMemo } from 'react';
 import { updateDoc, deleteDoc, bulkArchive } from '../../api/docsApi.js';
 import { DOC_CATEGORIES, FORMAT_COLORS } from '../../mocks/docsMockData.js';
 import DocExporter from './DocExporter.jsx';
+import DateField from '../DateField.jsx';
 
 const PAGE_SIZE = 20;
 
@@ -330,15 +331,13 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
             <option key={s}>{s}</option>
           ))}
         </select>
-        <input
-          type="date"
+        <DateField
           value={dateFrom}
           onChange={e => setDateFrom(e.target.value)}
           style={inputSt}
           title="From date"
         />
-        <input
-          type="date"
+        <DateField
           value={dateTo}
           onChange={e => setDateTo(e.target.value)}
           style={inputSt}

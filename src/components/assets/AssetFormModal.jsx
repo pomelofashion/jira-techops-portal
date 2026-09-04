@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { X, Save, Trash2 } from 'lucide-react';
 import { S } from '../../lib/styles.js';
+import DateField from '../DateField.jsx';
 
 const overlay = {
   position: 'fixed',
@@ -169,18 +170,14 @@ export default function AssetFormModal({ initial, onClose, onSave, onDelete }) {
         <div style={row}>
           <div style={col}>
             <label style={lbl}>Purchase date</label>
-            <input
-              type="date"
-              style={S.input}
+            <DateField
               value={draft.purchaseDate}
               onChange={e => set({ purchaseDate: e.target.value })}
             />
           </div>
           <div style={col}>
             <label style={lbl}>Warranty expires</label>
-            <input
-              type="date"
-              style={S.input}
+            <DateField
               value={draft.warrantyExpires}
               onChange={e => set({ warrantyExpires: e.target.value })}
             />

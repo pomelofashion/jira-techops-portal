@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { ISSUE_TYPES, PRIORITY_COLORS } from '../../lib/constants.js';
 import { S } from '../../lib/styles.js';
 import { LabelChip } from './BoardCard.jsx';
+import DateField from '../DateField.jsx';
 
 export default function QuickCreateModal({ onClose, onCreate, assignableUsers, onOpenFullForm }) {
   const [title, setTitle] = useState('');
@@ -126,11 +127,9 @@ export default function QuickCreateModal({ onClose, onCreate, assignableUsers, o
             </div>
             <div>
               <label style={S.label}>Due date</label>
-              <input
-                type="date"
+              <DateField
                 value={dueDate}
                 onChange={e => setDueDate(e.target.value)}
-                style={S.input}
                 aria-label="Due date"
               />
             </div>

@@ -10,6 +10,8 @@ import {
 } from 'react';
 import DocImportExportPage from './src/components/docs/DocImportExportPage.jsx';
 import TicketImportExportPage from './src/components/io/TicketImportExportPage.jsx';
+import DateField from './src/components/DateField.jsx';
+import TicketManagerPage from './src/components/tickets/TicketManagerPage.jsx';
 import DocStudioPage from './src/components/docs/studio/DocStudioPage.jsx';
 import SuggestionsPage from './src/components/suggestions/SuggestionsPage.jsx';
 import ServiceCatalogPage from './src/components/catalog/ServiceCatalogPage.jsx';
@@ -5593,12 +5595,12 @@ function TicketDetail({
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Due date</span>
               {canEditFields ? (
-                <input
-                  type="date"
+                <DateField
                   value={ticket.dueDate || ''}
                   onChange={e => patchTicket({ dueDate: e.target.value || null })}
                   aria-label="Due date"
                   style={{
+                    width: 'auto',
                     padding: '2px 6px',
                     borderRadius: '5px',
                     border: '1px solid var(--border-default)',
@@ -13667,6 +13669,7 @@ const SECTION_LABELS = {
   'catalog-admin': 'Service Catalog',
   'spaces-admin': 'Spaces & Boards',
   'import-export': 'Import / Export',
+  'ticket-manager': 'Ticket Manager',
   reports: 'Reports',
   roles: 'Roles & Access',
   users: 'Users',
@@ -14229,6 +14232,7 @@ const WIDE_SECTIONS = new Set([
   'changes',
   'reports',
   'import-export',
+  'ticket-manager',
 ]);
 
 // Sections that use the FULL remaining width (edge to edge, like a workspace).
@@ -14256,6 +14260,7 @@ const VALID_SECTIONS = new Set([
   'catalog-admin',
   'spaces-admin',
   'import-export',
+  'ticket-manager',
   'approvals',
   'assets',
   'incidents',
@@ -14263,6 +14268,7 @@ const VALID_SECTIONS = new Set([
   'changes',
   'reports',
   'import-export',
+  'ticket-manager',
 ]);
 const sectionFromHash = () => {
   const h = window.location.hash.replace('#', '');
@@ -14324,6 +14330,13 @@ const ADMIN_TOOLS = [
     label: 'Import / Export',
     hint: 'Migrate tickets from Jira; export to CSV',
     cap: 'system.export_data',
+  },
+  {
+    id: 'ticket-manager',
+    Icon: LayoutGrid,
+    label: 'Ticket Manager',
+    hint: 'Filter, move & bulk-assign tickets',
+    cap: 'tickets.reassign_any',
   },
   {
     id: 'reports',
@@ -14516,6 +14529,7 @@ function useRbacCtx() {
 // nothing (invisible Sign In button, unstyled links).
 const THEME_TOKENS_CSS = `
   :root, [data-theme="light"] {
+    color-scheme: light;
     --bg-page: #FAFAF9;
     --bg-surface: #FFFFFF;
     --bg-elevated: #FFFFFF;
@@ -14542,6 +14556,7 @@ const THEME_TOKENS_CSS = `
     --text-on-branded: #FFFFFF;
   }
   [data-theme="dark"] {
+    color-scheme: dark;
     --bg-page: #0B0B0E;
     --bg-surface: #17171A;
     --bg-elevated: #1C1C20;
@@ -14929,6 +14944,7 @@ function AppContent() {
       'catalog-admin': 'catalog.manage',
       'spaces-admin': 'spaces.manage',
       'import-export': 'system.export_data',
+      'ticket-manager': 'tickets.reassign_any',
       assets: 'assets.view',
       incidents: 'tickets.view_all',
       problems: 'tickets.view_all',
@@ -15097,6 +15113,15 @@ function AppContent() {
       case 'import-export':
         page = can('system.export_data') ? (
           <TicketImportExportPage
+            onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
+          />
+        ) : (
+          <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
+        );
+        break;
+      case 'ticket-manager':
+        page = can('tickets.reassign_any') ? (
+          <TicketManagerPage
             onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
           />
         ) : (

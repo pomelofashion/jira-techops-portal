@@ -15,6 +15,7 @@ import {
   completeChange,
 } from '../../api/changesApi.js';
 import ChangeCalendar from './ChangeCalendar.jsx';
+import DateField from '../DateField.jsx';
 
 export const CHANGE_TYPE_META = {
   standard: { label: 'Standard', color: '#16A34A', hint: 'Pre-approved, low-risk, routine' },
@@ -231,9 +232,8 @@ function ChangeDetail({ id, canManage, onBack, onToast }) {
           </div>
           <div style={{ flex: '1 1 200px' }}>
             <label style={lbl}>Window start</label>
-            <input
+            <DateField
               type="datetime-local"
-              style={S.input}
               value={draft.windowStart}
               disabled={!canManage}
               onChange={e => setDraft(d => ({ ...d, windowStart: e.target.value }))}
@@ -241,9 +241,8 @@ function ChangeDetail({ id, canManage, onBack, onToast }) {
           </div>
           <div style={{ flex: '1 1 200px' }}>
             <label style={lbl}>Window end</label>
-            <input
+            <DateField
               type="datetime-local"
-              style={S.input}
               value={draft.windowEnd}
               disabled={!canManage}
               onChange={e => setDraft(d => ({ ...d, windowEnd: e.target.value }))}

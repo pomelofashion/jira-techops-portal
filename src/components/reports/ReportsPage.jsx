@@ -15,6 +15,7 @@ import {
   getChangesReport,
 } from '../../api/reportsApi.js';
 import { StatTile, LineChart, BarChart, DonutGauge, CHART_SERIES } from './charts/primitives.jsx';
+import DateField from '../DateField.jsx';
 
 const OUTCOME_COLORS = { successful: '#16A34A', 'rolled-back': '#D97706', failed: '#DC2626' };
 
@@ -85,18 +86,16 @@ export default function ReportsPage({ onToast }) {
           <div style={S.pageSub}>Service desk KPIs — volumes, speed, SLA, satisfaction.</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <input
-            type="date"
-            style={{ ...S.input, width: '150px' }}
+          <DateField
+            style={{ width: '150px' }}
             value={from}
             max={to}
             onChange={e => setFrom(e.target.value)}
             aria-label="From date"
           />
           <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>→</span>
-          <input
-            type="date"
-            style={{ ...S.input, width: '150px' }}
+          <DateField
+            style={{ width: '150px' }}
             value={to}
             min={from}
             onChange={e => setTo(e.target.value)}
