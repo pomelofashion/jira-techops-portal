@@ -4603,6 +4603,108 @@ function TicketDetail({
         </div>
       </div>
 
+      {/* Description & submitted answers — shown first; each form question is a
+          large header. */}
+      <div style={{ ...S.card, marginBottom: '20px' }}>
+        <div
+          style={{
+            fontSize: '17px',
+            fontWeight: 800,
+            color: 'var(--text-primary)',
+            marginBottom: '10px',
+          }}
+        >
+          Description
+        </div>
+        {canEditAll ? (
+          <textarea
+            key={`desc-${ticket.id}`}
+            defaultValue={ticket.description || ''}
+            aria-label="Ticket description"
+            onBlur={e => {
+              const v = e.target.value;
+              if (v !== (ticket.description || '')) patchTicket({ description: v });
+            }}
+            style={{ ...S.textarea, fontSize: '14px', minHeight: '120px', lineHeight: 1.7 }}
+          />
+        ) : (
+          <div
+            style={{
+              fontSize: '14px',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.7,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {ticket.description || (
+              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                No description provided.
+              </span>
+            )}
+          </div>
+        )}
+        {ticket.currentResult && (
+          <div
+            style={{
+              marginTop: '20px',
+              paddingTop: '20px',
+              borderTop: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '17px',
+                fontWeight: 800,
+                color: 'var(--text-primary)',
+                marginBottom: '10px',
+              }}
+            >
+              Current Result
+            </div>
+            <div
+              style={{
+                fontSize: '14px',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.7,
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {ticket.currentResult}
+            </div>
+          </div>
+        )}
+        {ticket.expectedResult && (
+          <div
+            style={{
+              marginTop: '20px',
+              paddingTop: '20px',
+              borderTop: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '17px',
+                fontWeight: 800,
+                color: 'var(--text-primary)',
+                marginBottom: '10px',
+              }}
+            >
+              Expected Result
+            </div>
+            <div
+              style={{
+                fontSize: '14px',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.7,
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {ticket.expectedResult}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Approval requests on this ticket (catalog approval-gated types) */}
       {API_ENABLED && ticket.uuid && (
         <ApprovalPanel
@@ -5321,87 +5423,11 @@ function TicketDetail({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          gridTemplateColumns: '1fr',
           gap: '16px',
           marginBottom: '20px',
         }}
       >
-        {/* Timeline — merges local actions + Jira changelog when ticket is linked */}
-        <div style={S.card}>
-          <div
-            style={{
-              fontSize: '13px',
-              fontWeight: 700,
-              color: 'var(--text-secondary)',
-              marginBottom: '14px',
-            }}
-          >
-            Activity Timeline
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {(() => {
-              const localEntries = (ticket.timeline || []).map((t, i) => ({
-                key: `l-${i}`,
-                when: t.date,
-                actor: t.actor,
-                action: t.action,
-                source: 'local',
-              }));
-              const jiraEntries = (jiraChangelog || []).flatMap(h =>
-                h.changes.map((c, idx) => ({
-                  key: `j-${h.id}-${idx}`,
-                  when: h.created,
-                  actor: h.author,
-                  action: `${c.field}: ${c.from || '—'} → ${c.to || '—'}`,
-                  source: 'jira',
-                }))
-              );
-              const merged = [...localEntries, ...jiraEntries].sort((a, b) =>
-                String(b.when).localeCompare(String(a.when))
-              );
-              return merged.map((t, i) => (
-                <div key={t.key} style={{ display: 'flex', gap: '10px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <div
-                      style={{
-                        width: '8px',
-                        height: '8px',
-                        borderRadius: '50%',
-                        background: t.source === 'jira' ? '#1D4ED8' : 'var(--accent-primary)',
-                        flexShrink: 0,
-                        marginTop: '3px',
-                      }}
-                    />
-                    {i < merged.length - 1 && (
-                      <div
-                        style={{
-                          width: '1px',
-                          flex: 1,
-                          background: 'var(--border-default)',
-                          marginTop: '4px',
-                        }}
-                      />
-                    )}
-                  </div>
-                  <div style={{ paddingBottom: '8px' }}>
-                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                      {t.action}{' '}
-                      {t.source === 'jira' && (
-                        <span style={{ fontSize: '10px', color: '#1D4ED8', fontWeight: 700 }}>
-                          · Jira
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      {String(t.when).slice(0, 16).replace('T', ' ')} · {t.actor}
-                    </div>
-                  </div>
-                </div>
-              ));
-            })()}
-          </div>
-        </div>
-
         {/* Details */}
         <div style={S.card}>
           <div
@@ -5787,107 +5813,6 @@ function TicketDetail({
               </div>
             ))}
           </div>
-          <div
-            style={{
-              marginTop: '14px',
-              paddingTop: '14px',
-              borderTop: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '12px',
-                fontWeight: 700,
-                color: 'var(--text-secondary)',
-                marginBottom: '6px',
-              }}
-            >
-              Description
-            </div>
-            {canEditAll ? (
-              <textarea
-                key={`desc-${ticket.id}`}
-                defaultValue={ticket.description || ''}
-                aria-label="Ticket description"
-                onBlur={e => {
-                  const v = e.target.value;
-                  if (v !== (ticket.description || '')) patchTicket({ description: v });
-                }}
-                style={{ ...S.textarea, fontSize: '13px', minHeight: '90px', lineHeight: 1.6 }}
-              />
-            ) : (
-              <div
-                style={{
-                  fontSize: '13px',
-                  color: 'var(--text-secondary)',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {ticket.description}
-              </div>
-            )}
-          </div>
-          {ticket.currentResult && (
-            <div
-              style={{
-                marginTop: '14px',
-                paddingTop: '14px',
-                borderTop: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  color: 'var(--text-secondary)',
-                  marginBottom: '6px',
-                }}
-              >
-                Current result
-              </div>
-              <div
-                style={{
-                  fontSize: '13px',
-                  color: 'var(--text-secondary)',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {ticket.currentResult}
-              </div>
-            </div>
-          )}
-          {ticket.expectedResult && (
-            <div
-              style={{
-                marginTop: '14px',
-                paddingTop: '14px',
-                borderTop: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  color: 'var(--text-secondary)',
-                  marginBottom: '6px',
-                }}
-              >
-                Expected result
-              </div>
-              <div
-                style={{
-                  fontSize: '13px',
-                  color: 'var(--text-secondary)',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {ticket.expectedResult}
-              </div>
-            </div>
-          )}
           {/* Attachment summary line is replaced by the dedicated preview card above. */}
           {/* Status changes live in the Status card's dropdown above. */}
         </div>
@@ -6112,6 +6037,82 @@ function TicketDetail({
             )}
           </>
         )}
+      </div>
+
+      {/* Timeline — merges local actions + Jira changelog when ticket is linked */}
+      <div style={S.card}>
+        <div
+          style={{
+            fontSize: '13px',
+            fontWeight: 700,
+            color: 'var(--text-secondary)',
+            marginBottom: '14px',
+          }}
+        >
+          Activity Timeline
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {(() => {
+            const localEntries = (ticket.timeline || []).map((t, i) => ({
+              key: `l-${i}`,
+              when: t.date,
+              actor: t.actor,
+              action: t.action,
+              source: 'local',
+            }));
+            const jiraEntries = (jiraChangelog || []).flatMap(h =>
+              h.changes.map((c, idx) => ({
+                key: `j-${h.id}-${idx}`,
+                when: h.created,
+                actor: h.author,
+                action: `${c.field}: ${c.from || '—'} → ${c.to || '—'}`,
+                source: 'jira',
+              }))
+            );
+            const merged = [...localEntries, ...jiraEntries].sort((a, b) =>
+              String(b.when).localeCompare(String(a.when))
+            );
+            return merged.map((t, i) => (
+              <div key={t.key} style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: t.source === 'jira' ? '#1D4ED8' : 'var(--accent-primary)',
+                      flexShrink: 0,
+                      marginTop: '3px',
+                    }}
+                  />
+                  {i < merged.length - 1 && (
+                    <div
+                      style={{
+                        width: '1px',
+                        flex: 1,
+                        background: 'var(--border-default)',
+                        marginTop: '4px',
+                      }}
+                    />
+                  )}
+                </div>
+                <div style={{ paddingBottom: '8px' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {t.action}{' '}
+                    {t.source === 'jira' && (
+                      <span style={{ fontSize: '10px', color: '#1D4ED8', fontWeight: 700 }}>
+                        · Jira
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {String(t.when).slice(0, 16).replace('T', ' ')} · {t.actor}
+                  </div>
+                </div>
+              </div>
+            ));
+          })()}
+        </div>
       </div>
     </div>
   );
