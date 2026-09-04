@@ -75,7 +75,16 @@ export const unwatchTicket = id =>
 
 // Bulk import mapped Jira rows (batches of <=200). Requires system.export_data.
 export const importTickets = (boardId, tickets) =>
-  wrap(async () => (await api.post('/api/tickets/import', { boardId, tickets })).data);
+  wrap(
+    async () =>
+      (
+        await api.post(
+          '/api/tickets/import',
+          { boardId, tickets },
+          { timeout: 120000 } // bulk insert can outrun the default 20s client timeout
+        )
+      ).data
+  );
 
 // Session-authed CSV download link (all tickets, or a board/status filter).
 export const ticketsCsvUrl = ({ boardId, status } = {}) => {

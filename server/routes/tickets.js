@@ -413,67 +413,109 @@ router.post('/import', requireCapability('system.export_data'), async (req, res,
     ]);
     if (!board.rows.length) return res.status(400).json({ error: 'Unknown or archived board.' });
 
+    // Bulk path: a batch used to run ~4 sequential queries PER ROW against
+    // (remote) Postgres, so a 50-row batch could exceed the request/function
+    // timeout. Instead do a fixed handful of queries per batch: one dedup
+    // SELECT, one sequence reservation, one multi-row INSERT, one multi-row
+    // timeline INSERT.
+    const DONE = ['Live', "Closed - Won't Do", 'Resolved', 'Done', 'Closed'];
     const results = [];
     let created = 0;
     await withTransaction(async client => {
+      // 1. Dedup against existing jira_key rows AND within this batch.
+      const keys = tickets.map(t => t.jiraKey);
+      const existing = await client.query(
+        'SELECT jira_key, key FROM tickets WHERE jira_key = ANY($1)',
+        [keys]
+      );
+      const seenKey = new Map(existing.rows.map(r => [r.jira_key, r.key]));
+      const toInsert = [];
       for (const row of tickets) {
-        try {
-          const dup = await client.query('SELECT key FROM tickets WHERE jira_key=$1 LIMIT 1', [
-            row.jiraKey,
-          ]);
-          if (dup.rows.length) {
-            results.push({ jiraKey: row.jiraKey, status: 'skipped', key: dup.rows[0].key });
-            continue;
-          }
-          const seq = await client.query(
-            'UPDATE boards SET next_seq = next_seq + 1 WHERE id=$1 RETURNING key, next_seq',
-            [boardId]
-          );
-          const key = `${seq.rows[0].key}-${seq.rows[0].next_seq - 1}`;
-          const isDone = ['Live', "Closed - Won't Do", 'Resolved', 'Done', 'Closed'].includes(
-            row.status
-          );
-          const resolvedAt = row.resolvedAt || (isDone ? row.updatedAt : null);
-          const ins = await client.query(
-            `INSERT INTO tickets
-               (key, jira_key, title, description, category, priority, status,
-                requester_name, requester_email, assignee_name, assignee_email,
-                labels, due_date, issue_type, jira_sync_state, board_id,
-                record_type, created_at, updated_at, resolved_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,'local-only',$15,
-                     'ticket', COALESCE($16::timestamptz, now()), COALESCE($17::timestamptz, now()),
-                     $18::timestamptz)
-             RETURNING id`,
-            [
-              key,
-              row.jiraKey,
-              row.title,
-              row.description,
-              row.category,
-              row.priority,
-              row.status,
-              row.requesterName,
-              row.requesterEmail ? row.requesterEmail.toLowerCase() : null,
-              row.assigneeName,
-              row.assigneeEmail ? row.assigneeEmail.toLowerCase() : null,
-              JSON.stringify(row.labels),
-              row.dueDate,
-              row.issueType,
-              boardId,
-              row.createdAt,
-              row.updatedAt,
-              resolvedAt,
-            ]
-          );
-          await client.query(
-            'INSERT INTO ticket_timeline (ticket_id, action, actor) VALUES ($1,$2,$3)',
-            [ins.rows[0].id, `Imported from Jira ${row.jiraKey}`, 'import@system']
-          );
-          results.push({ jiraKey: row.jiraKey, status: 'created', key });
-          created++;
-        } catch (rowErr) {
-          results.push({ jiraKey: row.jiraKey, status: 'error', error: rowErr.message });
+        if (seenKey.has(row.jiraKey)) {
+          results.push({ jiraKey: row.jiraKey, status: 'skipped', key: seenKey.get(row.jiraKey) });
+        } else {
+          seenKey.set(row.jiraKey, null); // guard duplicates within the same file
+          toInsert.push(row);
         }
+      }
+
+      if (toInsert.length) {
+        // 2. Reserve a contiguous key range in one UPDATE (row-locked once).
+        const resv = await client.query(
+          'UPDATE boards SET next_seq = next_seq + $1 WHERE id=$2 RETURNING key, next_seq',
+          [toInsert.length, boardId]
+        );
+        const boardKey = resv.rows[0].key;
+        const startSeq = Number(resv.rows[0].next_seq) - toInsert.length;
+
+        // 3. One multi-row INSERT for every ticket in the batch.
+        const cols = 18;
+        const valuesSql = [];
+        const params = [];
+        toInsert.forEach((row, i) => {
+          const key = `${boardKey}-${startSeq + i}`;
+          const resolvedAt = row.resolvedAt || (DONE.includes(row.status) ? row.updatedAt : null);
+          const b = i * cols;
+          valuesSql.push(
+            `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},` +
+              `$${b + 9},$${b + 10},$${b + 11},$${b + 12}::jsonb,$${b + 13},$${b + 14},` +
+              `'local-only',$${b + 15},'ticket',COALESCE($${b + 16}::timestamptz, now()),` +
+              `COALESCE($${b + 17}::timestamptz, now()),$${b + 18}::timestamptz)`
+          );
+          params.push(
+            key,
+            row.jiraKey,
+            row.title,
+            row.description,
+            row.category,
+            row.priority,
+            row.status,
+            row.requesterName,
+            row.requesterEmail ? row.requesterEmail.toLowerCase() : null,
+            row.assigneeName,
+            row.assigneeEmail ? row.assigneeEmail.toLowerCase() : null,
+            JSON.stringify(row.labels),
+            row.dueDate,
+            row.issueType,
+            boardId,
+            row.createdAt,
+            row.updatedAt,
+            resolvedAt
+          );
+        });
+        const ins = await client.query(
+          `INSERT INTO tickets
+             (key, jira_key, title, description, category, priority, status,
+              requester_name, requester_email, assignee_name, assignee_email,
+              labels, due_date, issue_type, jira_sync_state, board_id,
+              record_type, created_at, updated_at, resolved_at)
+           VALUES ${valuesSql.join(',')}
+           RETURNING id, key, jira_key`,
+          params
+        );
+
+        // 4. One multi-row timeline INSERT.
+        const tlSql = [];
+        const tlParams = [];
+        ins.rows.forEach((r, i) => {
+          const b = i * 3;
+          tlSql.push(`($${b + 1},$${b + 2},$${b + 3})`);
+          tlParams.push(r.id, `Imported from Jira ${r.jira_key}`, 'import@system');
+        });
+        await client.query(
+          `INSERT INTO ticket_timeline (ticket_id, action, actor) VALUES ${tlSql.join(',')}`,
+          tlParams
+        );
+
+        const keyByJira = new Map(ins.rows.map(r => [r.jira_key, r.key]));
+        for (const row of toInsert) {
+          results.push({
+            jiraKey: row.jiraKey,
+            status: 'created',
+            key: keyByJira.get(row.jiraKey),
+          });
+        }
+        created = ins.rows.length;
       }
     });
     await writeAudit(req.user.email, 'ticket.import', `${created} tickets → ${board.rows[0].key}`);
