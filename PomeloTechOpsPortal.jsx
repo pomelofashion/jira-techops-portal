@@ -13,7 +13,14 @@ import TicketImportExportPage from './src/components/io/TicketImportExportPage.j
 import DateField from './src/components/DateField.jsx';
 import Avatar from './src/components/Avatar.jsx';
 import { registerAvatars, registerAvatar } from './src/lib/avatarRegistry.js';
+import {
+  TICKET_FIELD_DEFS,
+  DEFAULT_TICKET_FIELDS,
+  readFieldValue,
+} from './src/lib/ticketFields.js';
+import * as configApi from './src/api/configApi.js';
 import TicketManagerPage from './src/components/tickets/TicketManagerPage.jsx';
+import TicketFieldsConfigPage from './src/components/admin/TicketFieldsConfigPage.jsx';
 import DocStudioPage from './src/components/docs/studio/DocStudioPage.jsx';
 import SuggestionsPage from './src/components/suggestions/SuggestionsPage.jsx';
 import ServiceCatalogPage from './src/components/catalog/ServiceCatalogPage.jsx';
@@ -1739,6 +1746,22 @@ let SETTINGS = {
   defaultAssigneeEmail: DEFAULT_ASSIGNEE.email,
 };
 
+// Ticket-field layout config (server-backed, global). Which submission fields
+// show on a ticket, their order, labels, visibility and editability.
+let TICKET_FIELDS = DEFAULT_TICKET_FIELDS.slice();
+let _ticketFieldsVersion = 0;
+const _ticketFieldsListeners = new Set();
+const getTicketFields = () => TICKET_FIELDS;
+const setTicketFieldsLocal = fields => {
+  TICKET_FIELDS = Array.isArray(fields) ? fields : DEFAULT_TICKET_FIELDS.slice();
+  _ticketFieldsVersion++;
+  _ticketFieldsListeners.forEach(fn => fn(_ticketFieldsVersion));
+};
+const subscribeTicketFields = fn => {
+  _ticketFieldsListeners.add(fn);
+  return () => _ticketFieldsListeners.delete(fn);
+};
+
 let _rolesVersion = 0;
 const _rolesListeners = new Set();
 const bumpRoles = () => {
@@ -2072,6 +2095,9 @@ const hydrateFromBackend = async () => {
   }
   if (t.data?.tickets) updateTickets(t.data.tickets.map(ticketFromApi));
   if (sp.data?.spaces) setSpaces(sp.data.spaces);
+  configApi.getTicketFieldConfig().then(({ data }) => {
+    if (data?.fields) setTicketFieldsLocal(data.fields);
+  });
 };
 
 const updateUser = (id, updates) => {
@@ -4000,6 +4026,9 @@ function TicketDetail({
   // Full post-creation editing of every field (incl. requester, department,
   // shop, platforms) is admin-only — gated by the tickets.edit_all capability.
   const canEditAll = can('tickets.edit_all');
+  // Re-render when the admin changes the ticket-field layout.
+  const [, _setTicketFieldsV] = useState(0);
+  useEffect(() => subscribeTicketFields(() => _setTicketFieldsV(v => v + 1)), []);
   const [confirmDel, setConfirmDel] = useState(false);
   const [newMsg, setNewMsg] = useState('');
   const [messages, setMessages] = useState(ticket.messages);
@@ -4674,102 +4703,93 @@ function TicketDetail({
         </div>
       </div>
 
-      {/* Description & submitted answers — shown first; each form question is a
-          large header. */}
-      <div style={{ ...S.card, marginBottom: '20px' }}>
-        <div
-          style={{
-            fontSize: '17px',
-            fontWeight: 800,
-            color: 'var(--text-primary)',
-            marginBottom: '10px',
-          }}
-        >
-          Description
-        </div>
-        {canEditAll ? (
-          <textarea
-            key={`desc-${ticket.id}`}
-            defaultValue={ticket.description || ''}
-            aria-label="Ticket description"
-            onBlur={e => {
-              const v = e.target.value;
-              if (v !== (ticket.description || '')) patchTicket({ description: v });
-            }}
-            style={{ ...S.textarea, fontSize: '14px', minHeight: '120px', lineHeight: 1.7 }}
-          />
-        ) : (
-          <div>
-            {ticket.description ? (
-              renderRichDescription(ticket.description)
-            ) : (
-              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '14px' }}>
-                No description provided.
-              </span>
-            )}
+      {/* Structured ticket fields — labels are fixed from the admin config
+          (Ticket Fields page); values stay editable. Every configured field
+          shows for editors (empty ones as blank inputs); read-only viewers see
+          only populated fields. */}
+      {(() => {
+        const cfg = getTicketFields();
+        const renderable = cfg.filter(f => {
+          const def = TICKET_FIELD_DEFS[f.key];
+          if (!f.visible || !def) return false;
+          const editable = f.editable && (def.perm === 'all' ? canEditAll : canEditFields);
+          return editable || readFieldValue(ticket, f.key);
+        });
+        if (!renderable.length) return null;
+        return (
+          <div style={{ ...S.card, marginBottom: '20px' }}>
+            {renderable.map((f, idx) => {
+              const def = TICKET_FIELD_DEFS[f.key];
+              const value = readFieldValue(ticket, f.key);
+              const editable = f.editable && (def.perm === 'all' ? canEditAll : canEditFields);
+              const saveField = v => {
+                if (v === value) return;
+                if (f.key === 'requesterEmail') patchRequester({ email: v });
+                else if (f.key === 'requesterName') patchRequester({ name: v });
+                else patchTicket({ [f.key]: v });
+              };
+              return (
+                <div
+                  key={f.key}
+                  style={{
+                    marginTop: idx === 0 ? 0 : '20px',
+                    paddingTop: idx === 0 ? 0 : '20px',
+                    borderTop: idx === 0 ? 'none' : '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: '16px',
+                      fontWeight: 800,
+                      color: 'var(--text-primary)',
+                      marginBottom: '8px',
+                    }}
+                  >
+                    {f.label}
+                  </div>
+                  {editable ? (
+                    def.multiline ? (
+                      <textarea
+                        key={`${f.key}-${ticket.id}`}
+                        defaultValue={value}
+                        aria-label={f.label}
+                        onBlur={e => saveField(e.target.value)}
+                        style={{
+                          ...S.textarea,
+                          fontSize: '14px',
+                          minHeight: '90px',
+                          lineHeight: 1.7,
+                        }}
+                      />
+                    ) : (
+                      <input
+                        key={`${f.key}-${ticket.id}`}
+                        defaultValue={value}
+                        aria-label={f.label}
+                        onBlur={e => saveField(e.target.value)}
+                        style={{ ...S.input, fontSize: '14px' }}
+                      />
+                    )
+                  ) : def.rich ? (
+                    <div>{renderRichDescription(value)}</div>
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: '14px',
+                        color: 'var(--text-secondary)',
+                        lineHeight: 1.7,
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {value}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        )}
-        {ticket.currentResult && (
-          <div
-            style={{
-              marginTop: '20px',
-              paddingTop: '20px',
-              borderTop: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '17px',
-                fontWeight: 800,
-                color: 'var(--text-primary)',
-                marginBottom: '10px',
-              }}
-            >
-              Current Result
-            </div>
-            <div
-              style={{
-                fontSize: '14px',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.7,
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {ticket.currentResult}
-            </div>
-          </div>
-        )}
-        {ticket.expectedResult && (
-          <div
-            style={{
-              marginTop: '20px',
-              paddingTop: '20px',
-              borderTop: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '17px',
-                fontWeight: 800,
-                color: 'var(--text-primary)',
-                marginBottom: '10px',
-              }}
-            >
-              Expected Result
-            </div>
-            <div
-              style={{
-                fontSize: '14px',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.7,
-                whiteSpace: 'pre-wrap',
-              }}
-            >
-              {ticket.expectedResult}
-            </div>
-          </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Approval requests on this ticket (catalog approval-gated types) */}
       {API_ENABLED && ticket.uuid && (
@@ -13716,6 +13736,7 @@ const SECTION_LABELS = {
   'spaces-admin': 'Spaces & Boards',
   'import-export': 'Import / Export',
   'ticket-manager': 'Ticket Manager',
+  'ticket-fields': 'Ticket Fields',
   reports: 'Reports',
   roles: 'Roles & Access',
   users: 'Users',
@@ -14279,6 +14300,7 @@ const WIDE_SECTIONS = new Set([
   'reports',
   'import-export',
   'ticket-manager',
+  'ticket-fields',
 ]);
 
 // Sections that use the FULL remaining width (edge to edge, like a workspace).
@@ -14307,6 +14329,7 @@ const VALID_SECTIONS = new Set([
   'spaces-admin',
   'import-export',
   'ticket-manager',
+  'ticket-fields',
   'approvals',
   'assets',
   'incidents',
@@ -14315,6 +14338,7 @@ const VALID_SECTIONS = new Set([
   'reports',
   'import-export',
   'ticket-manager',
+  'ticket-fields',
 ]);
 const sectionFromHash = () => {
   const h = window.location.hash.replace('#', '');
@@ -14383,6 +14407,13 @@ const ADMIN_TOOLS = [
     label: 'Ticket Manager',
     hint: 'Filter, move & bulk-assign tickets',
     cap: 'tickets.reassign_any',
+  },
+  {
+    id: 'ticket-fields',
+    Icon: ClipboardList,
+    label: 'Ticket Fields',
+    hint: 'Configure the fields shown on tickets',
+    cap: 'system.settings_edit',
   },
   {
     id: 'reports',
@@ -14993,6 +15024,7 @@ function AppContent() {
       'spaces-admin': 'spaces.manage',
       'import-export': 'system.export_data',
       'ticket-manager': 'tickets.reassign_any',
+      'ticket-fields': 'system.settings_edit',
       assets: 'assets.view',
       incidents: 'tickets.view_all',
       problems: 'tickets.view_all',
@@ -15171,6 +15203,16 @@ function AppContent() {
         page = can('tickets.reassign_any') ? (
           <TicketManagerPage
             onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
+          />
+        ) : (
+          <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />
+        );
+        break;
+      case 'ticket-fields':
+        page = can('system.settings_edit') ? (
+          <TicketFieldsConfigPage
+            onToast={(msg, type) => setToast({ message: msg, type: type || 'success' })}
+            onSaved={fields => setTicketFieldsLocal(fields)}
           />
         ) : (
           <HomePage setSection={setSection} role={effectiveRole} currentUser={effectiveUser} />

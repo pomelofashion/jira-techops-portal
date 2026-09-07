@@ -32,6 +32,7 @@ import authRouter from './routes/auth.js';
 import ticketsRouter from './routes/tickets.js';
 import usersRouter from './routes/users.js';
 import suggestionsRouter from './routes/suggestions.js';
+import configRouter from './routes/config.js';
 import rolesRouter from './routes/roles.js';
 import auditRouter from './routes/audit.js';
 import docsRouter from './routes/docs.js';
@@ -147,6 +148,7 @@ if (dbEnabled) {
   app.use('/api/tickets', ticketsRouter);
   app.use('/api/users', usersRouter);
   app.use('/api/suggestions', suggestionsRouter);
+  app.use('/api/config', configRouter);
   app.use('/api/roles', rolesRouter);
   app.use('/api/audit', auditRouter);
   app.use('/api/docs', docsRouter);
