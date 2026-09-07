@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { MarkdownView } from '../docs/MarkdownView.jsx';
 import { SEED_ROLES } from '../../rbac.js';
+import Avatar from '../Avatar.jsx';
 import {
   loadSuggestions,
   hydrateSuggestions,
@@ -437,6 +438,12 @@ function CommentNode({ node, depth, me, onReply, onDelete }) {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <Avatar
+          name={node.authorName}
+          email={node.authorEmail}
+          size={22}
+          bg={node.authorRoleColor}
+        />
         <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
           {node.authorName}
         </span>
@@ -627,6 +634,12 @@ function Detail({
               marginBottom: '12px',
             }}
           >
+            <Avatar
+              name={item.authorName}
+              email={item.authorEmail}
+              size={24}
+              bg={item.authorRoleColor}
+            />
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
               {item.authorName}
             </span>
@@ -807,6 +820,12 @@ function Row({ item, me, onOpen, onVote }) {
             flexWrap: 'wrap',
           }}
         >
+          <Avatar
+            name={item.authorName}
+            email={item.authorEmail}
+            size={20}
+            bg={item.authorRoleColor}
+          />
           <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
             {item.authorName}
           </span>

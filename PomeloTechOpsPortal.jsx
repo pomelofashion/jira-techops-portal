@@ -11,6 +11,8 @@ import {
 import DocImportExportPage from './src/components/docs/DocImportExportPage.jsx';
 import TicketImportExportPage from './src/components/io/TicketImportExportPage.jsx';
 import DateField from './src/components/DateField.jsx';
+import Avatar from './src/components/Avatar.jsx';
+import { registerAvatars, registerAvatar } from './src/lib/avatarRegistry.js';
 import TicketManagerPage from './src/components/tickets/TicketManagerPage.jsx';
 import DocStudioPage from './src/components/docs/studio/DocStudioPage.jsx';
 import SuggestionsPage from './src/components/suggestions/SuggestionsPage.jsx';
@@ -709,18 +711,32 @@ const ticketFromApi = t => ({
   timeline: (t.timeline || []).map(x => ({ date: x.date, action: x.action, actor: x.actor })),
   messages: (t.comments || [])
     .filter(c => !c.internal)
-    .map(c => ({
-      id: c.id,
-      from: c.author,
-      authorEmail: c.authorEmail || null,
-      time: c.time,
-      text: c.body,
-      mentions: c.mentions || [],
-      synced: true,
-    })),
+    .map(c => {
+      if (c.authorAvatarUrl) registerAvatar(c.authorEmail, c.author, c.authorAvatarUrl);
+      return {
+        id: c.id,
+        from: c.author,
+        authorEmail: c.authorEmail || null,
+        avatarUrl: c.authorAvatarUrl || null,
+        time: c.time,
+        text: c.body,
+        mentions: c.mentions || [],
+        synced: true,
+      };
+    }),
   internalNotes: (t.comments || [])
     .filter(c => c.internal)
-    .map(c => ({ id: c.id, author: c.author, ts: c.time, text: c.body })),
+    .map(c => {
+      if (c.authorAvatarUrl) registerAvatar(c.authorEmail, c.author, c.authorAvatarUrl);
+      return {
+        id: c.id,
+        author: c.author,
+        authorEmail: c.authorEmail || null,
+        avatarUrl: c.authorAvatarUrl || null,
+        ts: c.time,
+        text: c.body,
+      };
+    }),
   pullRequests: [],
 });
 
@@ -973,6 +989,7 @@ const loadAssignableUsers = async (project = 'PESD1') => {
       source: data.source || 'fallback',
       loadedAt: new Date().toISOString(),
     };
+    registerAvatars(ASSIGNABLE_USERS.users);
     _assignableListeners.forEach(fn => fn(ASSIGNABLE_USERS));
     return ASSIGNABLE_USERS;
   } catch {
@@ -2050,6 +2067,7 @@ const hydrateFromBackend = async () => {
   ]);
   if (u.data?.users) {
     MOCK_USERS = u.data.users.map(userFromApi);
+    registerAvatars(MOCK_USERS);
     bumpUsers();
   }
   if (t.data?.tickets) updateTickets(t.data.tickets.map(ticketFromApi));
@@ -4623,7 +4641,8 @@ function TicketDetail({
                     fontWeight: 600,
                   }}
                 >
-                  🙋 Submitted by <strong>{ticket.requester.name}</strong>
+                  <Avatar name={ticket.requester.name} email={ticket.requester.email} size={18} />
+                  Submitted by <strong>{ticket.requester.name}</strong>
                   {ticket.requester.email ? <> · {ticket.requester.email}</> : null}
                 </div>
               )}
@@ -5164,7 +5183,17 @@ function TicketDetail({
                   >
                     {n.text}
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  <div
+                    style={{
+                      fontSize: '11px',
+                      color: 'var(--text-muted)',
+                      marginTop: '6px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <Avatar name={n.author} email={n.authorEmail} src={n.avatarUrl} size={18} />
                     {n.author} · {new Date(n.ts).toLocaleString()}
                   </div>
                 </div>
@@ -5914,23 +5943,13 @@ function TicketDetail({
                       alignItems: 'flex-end',
                     }}
                   >
-                    <div
-                      style={{
-                        width: '28px',
-                        height: '28px',
-                        borderRadius: '50%',
-                        flexShrink: 0,
-                        background: isYou ? 'var(--accent-primary)' : 'var(--bg-branded)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#fff',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      {m.from[0]}
-                    </div>
+                    <Avatar
+                      name={m.from}
+                      email={m.authorEmail}
+                      src={m.avatarUrl}
+                      size={28}
+                      bg={isYou ? 'var(--accent-primary)' : 'var(--bg-branded)'}
+                    />
                     <div style={{ maxWidth: '70%' }}>
                       <div
                         style={{
@@ -6036,9 +6055,16 @@ function TicketDetail({
                             color: 'var(--text-primary)',
                           }}
                         >
-                          @{u.name}{' '}
-                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                            {u.email}
+                          <span
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}
+                          >
+                            <Avatar name={u.name} email={u.email} size={20} />
+                            <span>
+                              @{u.name}{' '}
+                              <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                                {u.email}
+                              </span>
+                            </span>
                           </span>
                         </button>
                       ))}
@@ -7480,6 +7506,7 @@ function ProfileModal({ currentUser, setCurrentUser, onClose, onLogout }) {
     }
     setForm(f => ({ ...f, avatarUrl: dataUrl }));
     setCurrentUser(prev => ({ ...prev, avatarUrl: dataUrl }));
+    registerAvatar(currentUser?.email, currentUser?.name, dataUrl);
     setAvatarBusy(false);
   };
 
@@ -10794,28 +10821,13 @@ function UsersInRoleSection({ role, users, allRoles, canAssign, currentUserEmail
                 ) : (
                   <span style={{ width: '14px' }} />
                 )}
-                <div
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '50%',
-                    background: role.color || 'var(--accent-primary)',
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    fontSize: '12px',
-                    flexShrink: 0,
-                  }}
-                >
-                  {u.name
-                    .split(' ')
-                    .map(p => p[0])
-                    .join('')
-                    .slice(0, 2)
-                    .toUpperCase()}
-                </div>
+                <Avatar
+                  name={u.name}
+                  email={u.email}
+                  src={u.avatarUrl}
+                  size={32}
+                  bg={role.color || 'var(--accent-primary)'}
+                />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
                     {u.name}
@@ -11602,27 +11614,13 @@ function UsersPanelPage({ currentUserEmail }) {
                   <tr key={u.id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div
-                          style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            background: roleColor,
-                            color: '#fff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontWeight: 700,
-                            fontSize: '12px',
-                          }}
-                        >
-                          {u.name
-                            .split(' ')
-                            .map(p => p[0])
-                            .join('')
-                            .toUpperCase()
-                            .slice(0, 2)}
-                        </div>
+                        <Avatar
+                          name={u.name}
+                          email={u.email}
+                          src={u.avatarUrl}
+                          size={32}
+                          bg={roleColor}
+                        />
                         <div>
                           <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
                             {u.name}{' '}
@@ -14782,6 +14780,7 @@ function AppContent() {
         avatarUrl: u.avatarUrl || null,
         roleId,
       });
+      registerAvatar(u.email, u.name, u.avatarUrl);
       setRole(roleName);
       setIsAuthenticated(true);
       setAuditActor({ name: u.name, email: u.email });
@@ -14863,6 +14862,7 @@ function AppContent() {
       avatarUrl: user.avatarUrl || null,
       roleId,
     });
+    registerAvatar(user.email, user.name, user.avatarUrl);
     setRole(user.role);
     setIsAuthenticated(true);
     setAuthStatus('in');

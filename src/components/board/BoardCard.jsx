@@ -10,16 +10,9 @@ import {
   labelColorFor,
   DONE_STATUSES,
 } from '../../lib/constants.js';
+import Avatar from '../Avatar.jsx';
 
 const PRIORITY_ICONS = { Critical: ChevronsUp, High: ChevronUp, Medium: Equal, Low: ChevronDown };
-
-const initialsOf = name =>
-  String(name)
-    .split(/\s+/)
-    .map(w => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
 
 export function DueChip({ dueDate, status }) {
   if (!dueDate) return null;
@@ -178,23 +171,13 @@ export default function BoardCard({
         />
         <span style={{ marginLeft: 'auto' }}>
           {ticket.assignee ? (
-            <span
+            <Avatar
+              name={ticket.assignee}
+              email={ticket.assigneeEmail}
+              size={compact ? 18 : 22}
+              fontSize="9px"
               title={ticket.assignee}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: compact ? '18px' : '22px',
-                height: compact ? '18px' : '22px',
-                borderRadius: '50%',
-                background: 'var(--accent-primary)',
-                color: '#fff',
-                fontSize: '9px',
-                fontWeight: 800,
-              }}
-            >
-              {initialsOf(ticket.assignee)}
-            </span>
+            />
           ) : (
             <span
               title="Unassigned"

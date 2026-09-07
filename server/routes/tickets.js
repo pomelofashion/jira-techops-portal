@@ -113,6 +113,7 @@ const serializeComment = c => ({
   id: c.id,
   author: c.author,
   authorEmail: c.author_email || null,
+  authorAvatarUrl: c.author_avatar_url || null,
   body: c.body,
   internal: c.internal,
   mentions: c.mentions || [],
@@ -666,7 +667,10 @@ router.get('/:id', async (req, res, next) => {
     if (notFound) return res.status(404).json({ error: 'Ticket not found.' });
     if (forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
     const comments = await query(
-      'SELECT * FROM ticket_comments WHERE ticket_id=$1 ORDER BY created_at ASC',
+      `SELECT c.*, u.avatar_url AS author_avatar_url
+         FROM ticket_comments c
+         LEFT JOIN users u ON lower(u.email) = lower(c.author_email)
+        WHERE c.ticket_id=$1 ORDER BY c.created_at ASC`,
       [ticket.id]
     );
     const timeline = await query(
@@ -1697,7 +1701,9 @@ router.post('/:id/comments', async (req, res, next) => {
       );
     }
     await writeAudit(req.user.email, 'ticket.comment', ticket.key, { internal });
-    res.status(201).json(serializeComment(rows[0]));
+    res
+      .status(201)
+      .json(serializeComment({ ...rows[0], author_avatar_url: req.user.avatarUrl || null }));
   } catch (err) {
     next(err);
   }
