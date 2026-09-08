@@ -445,7 +445,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
               disabled={working}
               style={{
                 padding: '6px 12px',
-                background: 'var(--text-primary)',
+                background: 'var(--accent-primary)',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '6px',
@@ -732,7 +732,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
             disabled={page === 1}
             style={{
               padding: '6px 12px',
-              background: page === 1 ? 'var(--bg-hover)' : 'var(--text-primary)',
+              background: page === 1 ? 'var(--bg-hover)' : 'var(--accent-primary)',
               color: page === 1 ? 'var(--text-muted)' : '#fff',
               border: 'none',
               borderRadius: '6px',
@@ -776,7 +776,7 @@ export default function DocAdminPanel({ docs, onRefresh, onEdit }) {
             disabled={page === pages}
             style={{
               padding: '6px 12px',
-              background: page === pages ? 'var(--bg-hover)' : 'var(--text-primary)',
+              background: page === pages ? 'var(--bg-hover)' : 'var(--accent-primary)',
               color: page === pages ? 'var(--text-muted)' : '#fff',
               border: 'none',
               borderRadius: '6px',

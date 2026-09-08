@@ -120,7 +120,7 @@ function MetadataModal({ item, onSave, onClose }) {
       >
         <div
           style={{
-            background: 'var(--text-primary)',
+            background: 'var(--accent-primary)',
             padding: '18px 22px',
             display: 'flex',
             alignItems: 'center',
@@ -215,7 +215,7 @@ function MetadataModal({ item, onSave, onClose }) {
                     padding: '9px',
                     borderRadius: '8px',
                     border: `1.5px solid ${form.visibility === v ? 'var(--text-primary)' : 'var(--border-default)'}`,
-                    background: form.visibility === v ? 'var(--text-primary)' : 'transparent',
+                    background: form.visibility === v ? 'var(--accent-primary)' : 'transparent',
                     color: form.visibility === v ? '#fff' : 'var(--text-secondary)',
                     fontFamily: "'Inter', sans-serif",
                     fontWeight: 700,
@@ -411,7 +411,7 @@ export default function DocUploader({
                   onClick={() => setBulkCategory(bulkCatValue)}
                   style={{
                     padding: '6px 12px',
-                    background: 'var(--text-primary)',
+                    background: 'var(--accent-primary)',
                     color: '#fff',
                     border: 'none',
                     borderRadius: '7px',

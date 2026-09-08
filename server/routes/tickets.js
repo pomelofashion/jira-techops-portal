@@ -700,6 +700,93 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+// ─── Clone (staff) ────────────────────────────────────────────────────────────
+// Copies a ticket's content into a new ticket (optionally on another board),
+// mints a fresh key on the destination board, and auto-links the two with the
+// "clones" relation (original clones → new; new is cloned by → original). The
+// clone starts unassigned and in To Do so it can be handed to a developer.
+router.post('/:id/clone', async (req, res, next) => {
+  try {
+    const schema = z.object({ boardId: z.string().uuid().optional() }).strict();
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid input.' });
+
+    const src = await loadVisible(req, req.params.id);
+    if (src.notFound) return res.status(404).json({ error: 'Ticket not found.' });
+    if (src.forbidden) return res.status(403).json({ error: 'Insufficient permissions.' });
+    // Cloning creates a ticket on the destination board — same right as creating.
+    const s = src.ticket;
+    const destBoard = parsed.data.boardId || s.board_id || (await defaultBoardId());
+    if (destBoard && !canSubmitToBoard(req.user, destBoard))
+      return res.status(403).json({ error: 'No access to the destination board.' });
+
+    const result = await withTransaction(async client => {
+      let key;
+      if (destBoard) {
+        const seq = await client.query(
+          'UPDATE boards SET next_seq = next_seq + 1 WHERE id=$1 RETURNING key, next_seq',
+          [destBoard]
+        );
+        key = `${seq.rows[0].key}-${Number(seq.rows[0].next_seq) - 1}`;
+      } else {
+        key = await generateKey();
+      }
+      const ins = await client.query(
+        `INSERT INTO tickets
+           (key, title, description, category, priority, status,
+            requester_name, requester_email, department, shop, platforms, labels,
+            problem_category, issue_type, current_result, expected_result,
+            severity, jira_sync_state, board_id, record_type)
+         VALUES ($1,$2,$3,$4,$5,'To Do',$6,$7,$8,$9,$10::jsonb,$11::jsonb,
+                 $12,$13,$14,$15,$16,'local-only',$17,'ticket')
+         RETURNING *`,
+        [
+          key,
+          s.title,
+          s.description || '',
+          s.category,
+          s.priority,
+          s.requester_name,
+          s.requester_email,
+          s.department,
+          s.shop,
+          JSON.stringify(s.platforms || []),
+          JSON.stringify(s.labels || []),
+          s.problem_category,
+          s.issue_type || 'Task',
+          s.current_result,
+          s.expected_result,
+          s.severity || null,
+          destBoard,
+        ]
+      );
+      const clone = ins.rows[0];
+      // Auto-link: original --clones--> clone.
+      await client.query(
+        `INSERT INTO ticket_links (source_id, target_id, relation, created_by)
+         VALUES ($1,$2,'clones',$3) ON CONFLICT (source_id, target_id, relation) DO NOTHING`,
+        [s.id, clone.id, req.user.email]
+      );
+      await client.query(
+        'INSERT INTO ticket_timeline (ticket_id, action, actor) VALUES ($1,$2,$3)',
+        [clone.id, `Cloned from ${s.key}`, req.user.email]
+      );
+      await client.query(
+        'INSERT INTO ticket_timeline (ticket_id, action, actor) VALUES ($1,$2,$3)',
+        [s.id, `Cloned to ${clone.key}`, req.user.email]
+      );
+      return clone;
+    });
+    await writeAudit(req.user.email, 'ticket.clone', s.key, {
+      cloneKey: result.key,
+      boardId: destBoard,
+    });
+    res.status(201).json(serializeTicket(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── Links (staff) ────────────────────────────────────────────────────────────
 router.post('/:id/links', async (req, res, next) => {
   try {

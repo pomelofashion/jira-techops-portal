@@ -394,7 +394,7 @@ function UploaderModal({ manager, onClose, currentUser }) {
       >
         <div
           style={{
-            background: 'var(--text-primary)',
+            background: 'var(--accent-primary)',
             padding: '18px 24px',
             display: 'flex',
             alignItems: 'center',
@@ -1962,7 +1962,7 @@ export default function DocImportExportPage({
   };
   const applyBtnStyle = disabled => ({
     padding: '6px 12px',
-    background: disabled ? 'var(--border-default)' : 'var(--text-primary)',
+    background: disabled ? 'var(--border-default)' : 'var(--accent-primary)',
     color: disabled ? 'var(--text-muted)' : '#fff',
     border: 'none',
     borderRadius: '6px',
@@ -2137,7 +2137,7 @@ export default function DocImportExportPage({
                     disabled={exportingAll || displayDocs.length === 0}
                     style={{
                       padding: '8px 16px',
-                      background: exportingAll ? 'var(--border-strong)' : 'var(--text-primary)',
+                      background: exportingAll ? 'var(--border-strong)' : 'var(--accent-primary)',
                       color: '#fff',
                       border: 'none',
                       borderRadius: '8px',
@@ -2181,7 +2181,7 @@ export default function DocImportExportPage({
                           fontFamily: "'Inter', sans-serif",
                         }}
                       >
-                        <div style={{ background: 'var(--text-primary)', padding: '12px 16px' }}>
+                        <div style={{ background: 'var(--accent-primary)', padding: '12px 16px' }}>
                           <div style={{ color: '#fff', fontWeight: 900, fontSize: '13px' }}>
                             Export {displayDocs.length} document
                             {displayDocs.length !== 1 ? 's' : ''} as ZIP
@@ -2227,7 +2227,7 @@ export default function DocImportExportPage({
                                 gap: '10px',
                                 padding: '9px 10px',
                                 borderRadius: '8px',
-                                border: `1.5px solid ${exportAllFormat === fmt.id ? 'var(--text-primary)' : 'transparent'}`,
+                                border: `1.5px solid ${exportAllFormat === fmt.id ? 'var(--accent-primary)' : 'transparent'}`,
                                 background:
                                   exportAllFormat === fmt.id ? 'var(--accent-soft)' : 'transparent',
                                 cursor: 'pointer',
@@ -2691,7 +2691,9 @@ export default function DocImportExportPage({
                             overflow: 'hidden',
                           }}
                         >
-                          <div style={{ background: 'var(--text-primary)', padding: '10px 14px' }}>
+                          <div
+                            style={{ background: 'var(--accent-primary)', padding: '10px 14px' }}
+                          >
                             <div style={{ color: '#fff', fontWeight: 900, fontSize: '12px' }}>
                               Export {selectedCount} doc{selectedCount !== 1 ? 's' : ''} as ZIP
                             </div>
@@ -2709,7 +2711,7 @@ export default function DocImportExportPage({
                                   width: '100%',
                                   padding: '8px 10px',
                                   borderRadius: '7px',
-                                  border: `1.5px solid ${bulkExportFmt === fmt.id ? 'var(--text-primary)' : 'transparent'}`,
+                                  border: `1.5px solid ${bulkExportFmt === fmt.id ? 'var(--accent-primary)' : 'transparent'}`,
                                   background:
                                     bulkExportFmt === fmt.id ? 'var(--accent-soft)' : 'transparent',
                                   cursor: 'pointer',

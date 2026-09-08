@@ -137,6 +137,7 @@ import {
   GitBranch,
   BarChart3,
   ArrowLeftRight,
+  Copy,
 } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
@@ -3969,6 +3970,7 @@ function renderRichDescription(text) {
             color: 'var(--text-secondary)',
             lineHeight: 1.7,
             whiteSpace: 'pre-wrap',
+            overflowWrap: 'anywhere',
           }}
         >
           {body}
@@ -4030,6 +4032,10 @@ function TicketDetail({
   const [, _setTicketFieldsV] = useState(0);
   useEffect(() => subscribeTicketFields(() => _setTicketFieldsV(v => v + 1)), []);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneBoard, setCloneBoard] = useState('');
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [ticketActionBusy, setTicketActionBusy] = useState(false);
   const [newMsg, setNewMsg] = useState('');
   const [messages, setMessages] = useState(ticket.messages);
   const [internalNotes, setInternalNotes] = useState(ticket.internalNotes || []);
@@ -4392,8 +4398,16 @@ function TicketDetail({
     }
   };
 
+  // Auto-scroll only when the conversation GROWS after it's first populated —
+  // never on open/hydration (that was yanking the page to the bottom while the
+  // reader was still on the description). block:'nearest' keeps the page put
+  // when the latest message is already visible.
+  const prevMsgLen = useRef(0);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length > prevMsgLen.current && prevMsgLen.current > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    prevMsgLen.current = messages.length;
   }, [messages]);
 
   // On open, if this ticket is linked to Jira, pull any newer comments.
@@ -4522,6 +4536,197 @@ function TicketDetail({
           >
             <SearchCheck size={14} /> Create problem
           </button>
+        )}
+        {API_ENABLED && ticket.uuid && can('tickets.view_all') && (
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => {
+                setCloneBoard(ticket.boardId || '');
+                setCloneOpen(o => !o);
+                setMoveOpen(false);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '7px',
+                border: '1px solid var(--border-default)',
+                cursor: 'pointer',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '13px',
+              }}
+            >
+              <Copy size={14} /> Clone
+            </button>
+            {cloneOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  zIndex: 30,
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '10px',
+                  boxShadow: 'var(--shadow-dropdown)',
+                  padding: '12px',
+                  width: '260px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    marginBottom: '6px',
+                  }}
+                >
+                  Clone into board
+                </div>
+                <select
+                  value={cloneBoard}
+                  onChange={e => setCloneBoard(e.target.value)}
+                  style={{ ...S.select, width: '100%', marginBottom: '10px' }}
+                >
+                  {allBoards()
+                    .filter(b => !b.archived)
+                    .map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.key} — {b.name}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  disabled={ticketActionBusy}
+                  onClick={async () => {
+                    setTicketActionBusy(true);
+                    const { data, error } = await ticketsApi.cloneTicket(
+                      ticket.uuid,
+                      cloneBoard || undefined
+                    );
+                    setTicketActionBusy(false);
+                    setCloneOpen(false);
+                    if (error) {
+                      onAddNotification?.({
+                        type: 'status_change',
+                        title: 'Clone failed',
+                        body: error,
+                        actorName: currentUser?.name || 'You',
+                      });
+                      return;
+                    }
+                    addTicket(ticketFromApi(data));
+                    onAddNotification?.({
+                      type: 'status_change',
+                      title: `Cloned to ${data.key}`,
+                      body: `${ticket.id} was cloned and auto-linked. Opening the clone…`,
+                      actorName: currentUser?.name || 'You',
+                    });
+                    onOpenTicket?.(data.key);
+                  }}
+                  style={{ ...S.orangeBtn, width: '100%' }}
+                >
+                  {ticketActionBusy ? 'Cloning…' : 'Create clone'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {API_ENABLED && ticket.uuid && can('tickets.reassign_any') && (
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => {
+                setMoveOpen(o => !o);
+                setCloneOpen(false);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '7px',
+                border: '1px solid var(--border-default)',
+                cursor: 'pointer',
+                background: 'var(--bg-surface)',
+                color: 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '13px',
+              }}
+            >
+              <ArrowLeftRight size={14} /> Move
+            </button>
+            {moveOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  zIndex: 30,
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '10px',
+                  boxShadow: 'var(--shadow-dropdown)',
+                  padding: '12px',
+                  width: '260px',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    marginBottom: '6px',
+                  }}
+                >
+                  Move to board (keeps key)
+                </div>
+                <select
+                  defaultValue={ticket.boardId || ''}
+                  disabled={ticketActionBusy}
+                  onChange={async e => {
+                    const boardId = e.target.value;
+                    if (!boardId || boardId === ticket.boardId) return;
+                    setTicketActionBusy(true);
+                    const { error } = await ticketsApi.bulkUpdateTickets([ticket.uuid], {
+                      type: 'move',
+                      boardId,
+                    });
+                    setTicketActionBusy(false);
+                    setMoveOpen(false);
+                    if (error) {
+                      onAddNotification?.({
+                        type: 'status_change',
+                        title: 'Move failed',
+                        body: error,
+                        actorName: currentUser?.name || 'You',
+                      });
+                      return;
+                    }
+                    updateTickets(ts => ts.map(x => (x.id === ticket.id ? { ...x, boardId } : x)));
+                    const b = allBoards().find(x => x.id === boardId);
+                    onAddNotification?.({
+                      type: 'status_change',
+                      title: `Moved to ${b?.key || 'board'}`,
+                      body: `${ticket.id} moved to ${b?.name || 'another board'}.`,
+                      actorName: currentUser?.name || 'You',
+                    });
+                  }}
+                  style={{ ...S.select, width: '100%' }}
+                >
+                  {allBoards()
+                    .filter(b => !b.archived)
+                    .map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.key} — {b.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+          </div>
         )}
         {canDeleteTicket &&
           (confirmDel ? (
@@ -4779,6 +4984,7 @@ function TicketDetail({
                         color: 'var(--text-secondary)',
                         lineHeight: 1.7,
                         whiteSpace: 'pre-wrap',
+                        overflowWrap: 'anywhere',
                       }}
                     >
                       {value}
@@ -5199,6 +5405,7 @@ function TicketDetail({
                       fontSize: '13px',
                       color: 'var(--text-primary)',
                       whiteSpace: 'pre-wrap',
+                      overflowWrap: 'anywhere',
                     }}
                   >
                     {n.text}
@@ -7258,6 +7465,7 @@ function TicketPopupModal({ ticket, onClose, onOpenFull }) {
                 color: 'var(--text-secondary)',
                 lineHeight: 1.6,
                 whiteSpace: 'pre-wrap',
+                overflowWrap: 'anywhere',
               }}
             >
               {ticket.description}
@@ -7283,6 +7491,7 @@ function TicketPopupModal({ ticket, onClose, onOpenFull }) {
                   color: 'var(--text-secondary)',
                   lineHeight: 1.6,
                   whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
                 }}
               >
                 {ticket.currentResult}
@@ -7309,6 +7518,7 @@ function TicketPopupModal({ ticket, onClose, onOpenFull }) {
                   color: 'var(--text-secondary)',
                   lineHeight: 1.6,
                   whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
                 }}
               >
                 {ticket.expectedResult}

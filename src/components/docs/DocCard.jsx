@@ -119,7 +119,7 @@ export default function DocCard({
             height: '20px',
             borderRadius: '5px',
             border: `2px solid ${isSelected ? 'var(--text-primary)' : 'var(--text-muted)'}`,
-            background: isSelected ? 'var(--text-primary)' : 'var(--bg-surface)',
+            background: isSelected ? 'var(--accent-primary)' : 'var(--bg-surface)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

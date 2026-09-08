@@ -98,3 +98,7 @@ export const ticketsCsvUrl = ({ boardId, status } = {}) => {
 // Bulk action over ticket ids: {type:'status',status} | {type:'assign',assigneeEmail,assigneeName} | {type:'move',boardId}
 export const bulkUpdateTickets = (ids, action) =>
   wrap(async () => (await api.post('/api/tickets/bulk', { ids, action }, { timeout: 60000 })).data);
+
+// Clone a ticket into a new one (optionally on another board); auto-links them.
+export const cloneTicket = (id, boardId) =>
+  wrap(async () => (await api.post(`/api/tickets/${id}/clone`, boardId ? { boardId } : {})).data);
