@@ -20,6 +20,8 @@
 // Stays a pure-React renderer (no dangerouslySetInnerHTML, no new deps).
 
 // ─── Helpers shared with the Table of Contents (Sprint 4) ─────────────────────
+import { linkify } from '../../lib/linkify.jsx';
+
 export const slugify = text =>
   String(text)
     .toLowerCase()
@@ -111,7 +113,7 @@ export function renderInline(text) {
     if (/^\+\+[^+]+\+\+$/.test(part)) return <u key={j}>{part.slice(2, -2)}</u>;
     if (/^\*[^*]+\*$/.test(part)) return <em key={j}>{part.slice(1, -1)}</em>;
     if (/^_[^_]+_$/.test(part)) return <em key={j}>{part.slice(1, -1)}</em>;
-    return part;
+    return linkify(part, `u${j}`);
   });
 }
 

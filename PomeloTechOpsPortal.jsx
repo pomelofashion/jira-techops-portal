@@ -12,6 +12,7 @@ import DocImportExportPage from './src/components/docs/DocImportExportPage.jsx';
 import TicketImportExportPage from './src/components/io/TicketImportExportPage.jsx';
 import DateField from './src/components/DateField.jsx';
 import Avatar from './src/components/Avatar.jsx';
+import { linkify } from './src/lib/linkify.jsx';
 import { registerAvatars, registerAvatar } from './src/lib/avatarRegistry.js';
 import {
   TICKET_FIELD_DEFS,
@@ -3930,9 +3931,9 @@ function StatusDropdown({ status, onChange, disabled }) {
 // Highlight @Name spans for names actually mentioned on the message.
 // Pure string split — React escapes everything; no HTML surface.
 function renderWithMentions(text, mentions) {
-  if (!mentions || mentions.length === 0) return text;
+  if (!mentions || mentions.length === 0) return linkify(text);
   const names = mentions.map(m => m.name).filter(Boolean);
-  if (!names.length) return text;
+  if (!names.length) return linkify(text);
   const re = new RegExp(
     `(@(?:${names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}))`,
     'g'
@@ -3945,7 +3946,7 @@ function renderWithMentions(text, mentions) {
           {part}
         </span>
       ) : (
-        part
+        linkify(part, `m${i}`)
       )
     );
 }
@@ -3973,7 +3974,7 @@ function renderRichDescription(text) {
             overflowWrap: 'anywhere',
           }}
         >
-          {body}
+          {linkify(body)}
         </div>
       );
     }
@@ -4987,7 +4988,7 @@ function TicketDetail({
                         overflowWrap: 'anywhere',
                       }}
                     >
-                      {value}
+                      {linkify(value)}
                     </div>
                   )}
                 </div>
@@ -5408,7 +5409,7 @@ function TicketDetail({
                       overflowWrap: 'anywhere',
                     }}
                   >
-                    {n.text}
+                    {linkify(n.text)}
                   </div>
                   <div
                     style={{
@@ -7468,7 +7469,7 @@ function TicketPopupModal({ ticket, onClose, onOpenFull }) {
                 overflowWrap: 'anywhere',
               }}
             >
-              {ticket.description}
+              {linkify(ticket.description)}
             </div>
           </div>
           {ticket.currentResult && (
@@ -7494,7 +7495,7 @@ function TicketPopupModal({ ticket, onClose, onOpenFull }) {
                   overflowWrap: 'anywhere',
                 }}
               >
-                {ticket.currentResult}
+                {linkify(ticket.currentResult)}
               </div>
             </div>
           )}
@@ -7521,7 +7522,7 @@ function TicketPopupModal({ ticket, onClose, onOpenFull }) {
                   overflowWrap: 'anywhere',
                 }}
               >
-                {ticket.expectedResult}
+                {linkify(ticket.expectedResult)}
               </div>
             </div>
           )}
